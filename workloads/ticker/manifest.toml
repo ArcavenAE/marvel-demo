@@ -7,7 +7,7 @@
 name = "lab"
 
 [[team]]
-name = "lab"
+name = "ticker"
 
   [[team.role]]
   name = "ticker"

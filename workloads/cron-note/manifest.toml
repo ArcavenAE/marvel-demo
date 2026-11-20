@@ -8,7 +8,7 @@
 name = "lab"
 
 [[team]]
-name = "lab"
+name = "cron-note"
 
   [[team.role]]
   name = "cron-note"

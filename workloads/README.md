@@ -9,6 +9,10 @@ a README with the exact lines a passing run prints and how those lines were reco
 | `cron-note/` | a shell loop that appends a numbered UTC line every 2 minutes, with a marvel cadence on the same schedule |
 | `relay/` | two shell seats that exchange a message on the bus with the `nats` command line tool |
 
+Each workload is its own marvel team (`ticker`, `cron-note`, `relay`) in the workspace `lab`,
+because applying a manifest replaces the roles of the team it names: sharing one team would
+retire the other workloads' seats. A session is named `<team>-<role>-g<generation>-<n>`.
+
 The files here name no real person, host or path.
 
 Each workload keeps its files under `${LAB_STATE:-$HOME/lab-run}/<workload>/`, a lab-owned

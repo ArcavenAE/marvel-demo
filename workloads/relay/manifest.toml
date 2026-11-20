@@ -9,7 +9,7 @@
 name = "lab"
 
 [[team]]
-name = "lab"
+name = "relay"
 
   [[team.role]]
   name = "pong"

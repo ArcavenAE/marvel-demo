@@ -10,7 +10,7 @@ It also rewrites `<session>.handoff.md` in the same directory with its counter a
 `END HANDOFF`. The manifest's `shift.handoff` path is `~/lab-run/ticker/{session}.handoff.md`, so
 it matches only while `LAB_STATE` is unset. A successor started with `MARVEL_PREDECESSOR` set reads the
 predecessor's handoff file and continues the count. marvel sets `MARVEL_PREDECESSOR` to the
-predecessor's session key, `<workspace>/<name>` (here `lab/lab-ticker-g1-0`), and the loop
+predecessor's session key, `<workspace>/<name>` (here `lab/ticker-ticker-g1-0`), and the loop
 keeps only the part after the last `/` to find the file.
 
 Files:
@@ -20,21 +20,21 @@ Files:
 
 ## Expected lines
 
-A first seat named `lab-ticker-g1-0` that runs three ticks:
+A first seat named `ticker-ticker-g1-0` that runs three ticks:
 
-    lab-ticker-g1-0 gen=1 count=1 v=v1
-    lab-ticker-g1-0 gen=1 count=2 v=v1
-    lab-ticker-g1-0 gen=1 count=3 v=v1
+    ticker-ticker-g1-0 gen=1 count=1 v=v1
+    ticker-ticker-g1-0 gen=1 count=2 v=v1
+    ticker-ticker-g1-0 gen=1 count=3 v=v1
 
 Its handoff file ends:
 
     count=3
     END HANDOFF
 
-Its successor `lab-ticker-g2-0`, started with `MARVEL_PREDECESSOR=lab/lab-ticker-g1-0`, continues the count in its own log:
+Its successor `ticker-ticker-g2-0`, started with `MARVEL_PREDECESSOR=lab/ticker-ticker-g1-0`, continues the count in its own log:
 
-    lab-ticker-g2-0 gen=2 count=4 v=v1
-    lab-ticker-g2-0 gen=2 count=5 v=v1
+    ticker-ticker-g2-0 gen=2 count=4 v=v1
+    ticker-ticker-g2-0 gen=2 count=5 v=v1
 
 With `manifest-v2.toml` the same lines end `v=v2`.
 
@@ -51,7 +51,7 @@ successor started), not assume the numbers never repeat.
 
 The loop in `manifest.toml` was run by itself, not under marvel: `sh -c` with the
 manifest's own script, in an empty environment with `MARVEL_SESSION` (and
-`MARVEL_PREDECESSOR` for the successor, in the key form `lab/lab-ticker-g1-0`) set by hand, a scratch `HOME`, no
+`MARVEL_PREDECESSOR` for the successor, in the key form `lab/ticker-ticker-g1-0`) set by hand, a scratch `HOME`, no
 `MARVEL_SOCKET` and no daemon. `TICKER_MAX` and `TICKER_INTERVAL=0` stop the loop
 after a fixed count with no wait; the manifest sets neither, so a real seat ticks every 5 seconds without end.
 

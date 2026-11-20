@@ -12,7 +12,7 @@ and no credentials file. They need `nats` on `PATH`.
 
 ## Expected lines
 
-After three pings, the log of a seat named `lab-ping-g1-0` holds:
+After three pings, the log of a seat named `relay-ping-g1-0` holds:
 
     pong 1
     pong 2

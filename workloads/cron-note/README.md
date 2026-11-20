@@ -16,12 +16,12 @@ are not tied to each other.
 
 ## Expected lines
 
-A seat named `lab-cron-note-g1-0` after three slots. The time field differs on every
+A seat named `cron-note-cron-note-g1-0` after three slots. The time field differs on every
 run, so it is shown as `<time>`; each real time reads like `2026-01-01T00:00:00Z`:
 
-    lab-cron-note-g1-0 slot=1 <time>
-    lab-cron-note-g1-0 slot=2 <time>
-    lab-cron-note-g1-0 slot=3 <time>
+    cron-note-cron-note-g1-0 slot=1 <time>
+    cron-note-cron-note-g1-0 slot=2 <time>
+    cron-note-cron-note-g1-0 slot=3 <time>
 
 Two real lines are two minutes apart, to within the time the loop takes to run.
 
