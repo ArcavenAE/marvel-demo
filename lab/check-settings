@@ -69,6 +69,12 @@ REQUIRED_DENY = [
     "Edit(./lab/run)",
     "Edit(./lab.lock)",
     "Edit(./lab/HARNESS.md)",
+    # The report recipe runs lab/report, and Edit(./lab/**) is allowed, so
+    # without this deny the agent could rewrite the file and run it. The
+    # sentinel is denied for Read as well as for running, since Read(./lab/**)
+    # would otherwise allow reading it.
+    "Edit(./lab/report)",
+    "Read(./lab/deny-probe)",
 ]
 
 # The Bash lines the lab grants, and nothing else. A Bash allow passes only if

@@ -28,7 +28,9 @@
       "Edit(./lab/test/**)",
       "Edit(./lab/run)",
       "Edit(./lab.lock)",
-      "Edit(./lab/HARNESS.md)"
+      "Edit(./lab/HARNESS.md)",
+      "Edit(./lab/report)",
+      "Read(./lab/deny-probe)"
     ]
   }
 }
