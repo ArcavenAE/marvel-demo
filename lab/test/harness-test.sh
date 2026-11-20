@@ -128,6 +128,47 @@ lab check 04; expect_has "a malformed FAIL is a shape failure" "$OUT" "RUNG 04 F
 lab check 05; expect_has "a script with no digest line FAILs" "$OUT" "RUNG 05 FAIL H-nodigest:"
 lab check 09; expect_has "an id with no script FAILs" "$OUT" "RUNG 09 FAIL H-missing:"
 
+# The verdict and the exit status must agree for FAIL and SKIP as well as PASS.
+fixture h-exit
+check 01-fail-zero.sh 'echo "RUNG 01 FAIL C-exit-1: seen"'
+check 02-fail-two.sh 'echo "RUNG 02 FAIL C-exit-2: seen"; exit 2'
+check 03-skip-one.sh 'echo "RUNG 03 SKIP not granted"; exit 1'
+lock
+lab check 01
+expect_has "FAIL with exit 0 is a mismatch" "$OUT" "RUNG 01 FAIL H-mismatch:"
+expect "FAIL with exit 0 exits 1" "$RC" 1
+lab check 02
+expect_has "FAIL with exit 2 is a mismatch" "$OUT" "RUNG 02 FAIL H-mismatch:"
+lab check 03
+expect_has "SKIP with exit 1 is a mismatch" "$OUT" "RUNG 03 FAIL H-mismatch:"
+expect "SKIP with exit 1 exits 1" "$RC" 1
+expect_not "SKIP with exit 1 is not reported as a skip" "$OUT" "RUNG 03 SKIP"
+
+# Two scripts for one id: refuse, and run neither.
+fixture h-ambiguous
+check 01-a.sh "touch \"$FX/ran-a\"; echo \"RUNG 01 PASS\""
+check 01-b.sh "touch \"$FX/ran-b\"; echo \"RUNG 01 PASS\""
+lock
+lab check 01
+expect_has "two scripts for one id is ambiguous" "$OUT" "RUNG 01 FAIL H-ambiguous:"
+expect "ambiguous exits 1" "$RC" 1
+if [[ -e $FX/ran-a || -e $FX/ran-b ]]; then bad "ambiguous ran a script"; else ok "ambiguous ran neither script"; fi
+
+# A version command that never answers must not hang the run.
+fixture c-timeout
+printf '%s\n' '#!/bin/sh' 'exec sleep 30' >"$FX/bin/hangtool"
+chmod +x "$FX/bin/hangtool"
+check 01-pass.sh 'echo "RUNG 01 PASS"'
+printf '%s\n' 'version hangtool 1.0.0 hangtool --version' >>"$FX/lab.lock"
+lock
+start=$SECONDS
+LAB_VERSION_TIMEOUT=1 lab check 01
+elapsed=$((SECONDS - start))
+expect_has "a hung version command WARNs" "$OUT" "WARN version hangtool: lock 1.0.0, no answer in 1s"
+expect_has "a hung version command does not stop the check" "$OUT" "RUNG 01 PASS"
+expect "a hung version command exits 0" "$RC" 0
+if [[ $elapsed -lt 10 ]]; then ok "the run ended within 10s (took ${elapsed}s)"; else bad "the run took ${elapsed}s"; fi
+
 fixture h-nolock
 check 01-pass.sh 'echo "RUNG 01 PASS"'
 mv "$FX/lab.lock" "$FX/lab.lock.gone"
