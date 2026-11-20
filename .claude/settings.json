@@ -33,6 +33,9 @@
       "Edit(./lab/mod.just)",
       "Edit(./lab/justfile)",
       "Edit(./lab/.justfile)",
+      "Edit(./lab.just)",
+      "Edit(./justfile)",
+      "Edit(./.claude/settings.json)",
       "Read(./lab/deny-probe)"
     ]
   }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lab/report <rung> --nonce <value> [--denials FILE] [--post --issue N]
+# lab/report <rung> --nonce <value> [--denials lab/state/NAME] [--post --issue N]
 #
 # Writes the lab report for one rung in the fixed shape lab/verify-report
 # checks, and prints it. With --post it also posts the same bytes as a comment
@@ -26,7 +26,7 @@ set -euo pipefail
 ROOT=${LAB_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 
 usage() {
-  printf 'usage: lab/report <rung> --nonce <value> [--denials FILE] [--post --issue N]\n' >&2
+  printf 'usage: lab/report <rung> --nonce <value> [--denials lab/state/NAME] [--post --issue N]\n' >&2
   exit 2
 }
 
@@ -53,9 +53,27 @@ re='^[0-9]+[a-z]?$'
 [[ $id =~ $re ]] || usage
 re='^[A-Za-z0-9_-]{8,64}$'
 [[ $nonce =~ $re ]] || usage
-if [[ -n $denials && ! -f $denials ]]; then
-  printf 'lab/report: cannot read %s\n' "$denials" >&2
-  exit 2
+# The denials file is read as text, and only from lab/state/ under the tree
+# root: plain names, no `.` or `..` part, no symlink on the way. Any other path
+# would let this script read, and then post, a file the caller cannot read.
+if [[ -n $denials ]]; then
+  re='^lab/state(/[A-Za-z0-9_-][A-Za-z0-9._-]*)+$'
+  if [[ ! $denials =~ $re ]]; then
+    printf 'lab/report: refusing the denials path [%s]: it must be lab/state/ then plain names\n' "$denials" >&2
+    exit 2
+  fi
+  walk=$ROOT
+  for part in ${denials//\// }; do
+    walk=$walk/$part
+    if [[ -L $walk ]]; then
+      printf 'lab/report: refusing the denials path [%s]: a symlink is on the way\n' "$denials" >&2
+      exit 2
+    fi
+  done
+  if [[ ! -f $ROOT/$denials ]]; then
+    printf 'lab/report: cannot read %s\n' "$denials" >&2
+    exit 2
+  fi
 fi
 if [[ $post -eq 1 ]]; then
   re='^[1-9][0-9]*$'
@@ -144,7 +162,7 @@ build_body() {
   printf 'nonce %s\n' "$nonce"
   printf 'denials and prompts\n'
   if [[ -n $denials ]]; then
-    clean <"$denials" | awk '
+    clean <"$ROOT/$denials" | awk '
       { sub(/^- /, ""); if ($0 == "") next
         n++
         if (n <= 20) print "- " substr($0, 1, 200)
