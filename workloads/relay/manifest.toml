@@ -1,0 +1,51 @@
+# Lab workload relay, part (i): two shell seats that exchange a message on the bus.
+# `ping` publishes "ping <n>" on lab.relay.ping every 5 seconds and logs what it
+# hears on lab.relay.pong to ${LAB_STATE:-$HOME/lab-run}/relay/<session>.log. `pong` listens
+# on lab.relay.ping and answers "pong <n>" on lab.relay.pong. Both use the nats
+# command line tool against RELAY_URL (default nats://127.0.0.1:4222) with no
+# context and no credentials. See README.md.
+
+[workspace]
+name = "lab"
+
+[[team]]
+name = "relay"
+
+  [[team.role]]
+  name = "pong"
+  replicas = 1
+  restart_policy = "always"
+
+    [team.role.runtime]
+    image = "shell"
+    command = "sh"
+    args = ["-c", '''u="${RELAY_URL:-nats://127.0.0.1:4222}"
+nats --no-context --server "$u" sub --raw lab.relay.ping | while read -r line; do
+  [ -n "$line" ] || continue
+  nats --no-context --server "$u" pub lab.relay.pong "pong ${line#ping }" > /dev/null
+done
+''']
+
+  [[team.role]]
+  name = "ping"
+  replicas = 1
+  restart_policy = "always"
+
+    [team.role.runtime]
+    image = "shell"
+    command = "sh"
+    args = ["-c", '''u="${RELAY_URL:-nats://127.0.0.1:4222}"
+d="${RELAY_DIR:-${LAB_STATE:-$HOME/lab-run}/relay}"
+mkdir -p "$d"
+nats --no-context --server "$u" sub --raw lab.relay.pong >> "$d/$MARVEL_SESSION.log" &
+p=$!
+trap 'kill "$p" 2>/dev/null' EXIT
+n=0
+while true; do
+  n=$((n + 1))
+  nats --no-context --server "$u" pub lab.relay.ping "ping $n" > /dev/null
+  if [ -n "${RELAY_MAX:-}" ] && [ "$n" -ge "$RELAY_MAX" ]; then break; fi
+  sleep "${RELAY_INTERVAL:-5}"
+done
+sleep "${RELAY_DRAIN:-0}"
+''']
