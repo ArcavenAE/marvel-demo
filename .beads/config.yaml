@@ -1,0 +1,3 @@
+# The lab's bd settings. bd init adds the rest, using its embedded engine.
+# No server, no user and no database name are set here on purpose.
+issue-prefix: "lab"
