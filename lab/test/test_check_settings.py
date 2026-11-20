@@ -41,6 +41,12 @@ REQUIRED_DENY = [
     "Bash(marvel keys authorize:*)",
     "Bash(marvel config add-cluster:*)",
     "Bash(./lab/deny-probe:*)",
+    # Director's call: the agent may not edit the files the gates trust.
+    "Edit(./lab/check-settings)",
+    "Edit(./lab/test/**)",
+    "Edit(./lab/run)",
+    "Edit(./lab.lock)",
+    "Edit(./lab/HARNESS.md)",
 ]
 
 EXPECTED_ALLOW = [
@@ -132,6 +138,24 @@ def expect_fail(name, cid, mutate=None, raw=None, extra_files=None):
     st = line_status(out, cid)
     record(name, rc == 1 and st == "FAIL",
            "want rc 1 and %s FAIL, got rc %r and %s %r; output: %s" % (cid, rc, cid, st, (out or "")[:300]))
+
+
+def expect_fail_all(name, cids, mutate=None, raw=None, extra_files=None, setup=None):
+    """Every check in cids must report FAIL and the command must exit 1."""
+    proj = make_project(mutate=mutate, raw=raw, extra_files=extra_files)
+    if setup:
+        setup(proj)
+    rc, out = check_project(proj)
+    sts = dict((c, line_status(out, c)) for c in cids)
+    record(name, rc == 1 and all(v == "FAIL" for v in sts.values()),
+           "want rc 1 and FAIL for %s, got rc %r and %r; output: %s" % (cids, rc, sts, (out or "")[:300]))
+
+
+def expect_pass(name, cid, mutate=None):
+    proj = make_project(mutate=mutate)
+    rc, out = check_project(proj)
+    record(name, line_status(out, cid) == "PASS",
+           "want %s PASS, got %r: %s" % (cid, line_status(out, cid), (out or "")[:300]))
 
 
 def allow(doc):
@@ -378,10 +402,151 @@ def test_no_writes_to_home():
            "digest changed or the run printed no C-set-1 line: %s" % (out or "")[:200])
 
 
+def test_failopen_first_word():
+    """An allow whose first word is a shell or interpreter grants arbitrary code."""
+    for rule in ("Bash(bash -c:*)", "Bash(sh -c:*)", "Bash(zsh -c:*)", "Bash(python3 -c:*)",
+                 "Bash(python -c:*)", "Bash(env A=1:*)", "Bash(sudo ls:*)", "Bash(curl -s x:*)",
+                 "Bash(ssh host cmd:*)", "Bash(A=1 bash -c:*)", "Bash(./sh -c:*)",
+                 "Bash(node -e:*)", "Bash(xargs rm:*)", "Bash(eval x:*)"):
+        expect_fail("fail-open 1: %s fails C-set-2" % rule, "C-set-2",
+                    mutate=lambda d, r=rule: allow(d).append(r))
+    for rule in ("Bash(marvel:*)", "Bash(gh:*)", "Bash(tmux:*)", "Bash(marvel *)"):
+        expect_fail("fail-open 1: one-word %s still fails" % rule, "C-set-2",
+                    mutate=lambda d, r=rule: allow(d).append(r))
+    # Controls: a narrow multi-word allow on a lab tool, and a word that only
+    # starts like a shell, must not trip the first-word rule.
+    expect_pass("fail-open 1: control, Bash(marvel get:*) passes C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Bash(marvel get:*)"))
+    expect_pass("fail-open 1: control, Bash(bashful lab:*) passes C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Bash(bashful lab:*)"))
+
+
+def test_failopen_types():
+    """A value of the wrong type must fail, never be skipped."""
+    expect_fail_all("fail-open 2: allow as a string fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
+                    mutate=lambda d: d.setdefault("permissions", {}).update({"allow": "Bash(*)"}))
+    expect_fail_all("fail-open 2: allow as an object fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
+                    mutate=lambda d: d.setdefault("permissions", {}).update({"allow": {"Bash(*)": 1}}))
+    expect_fail_all("fail-open 2: allow as a number fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
+                    mutate=lambda d: d.setdefault("permissions", {}).update({"allow": 7}))
+    expect_fail_all("fail-open 2: a non-string allow entry fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
+                    mutate=lambda d: allow(d).append(5))
+    expect_fail_all("fail-open 2: a null allow entry fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
+                    mutate=lambda d: allow(d).append(None))
+    expect_fail_all("fail-open 2: permissions as a string fails C-set-2, C-set-3 and C-set-4",
+                    ["C-set-2", "C-set-3", "C-set-4"],
+                    mutate=lambda d: d.update({"permissions": "allow everything"}))
+    expect_fail_all("fail-open 2: permissions as a list fails C-set-2, C-set-3 and C-set-4",
+                    ["C-set-2", "C-set-3", "C-set-4"],
+                    mutate=lambda d: d.update({"permissions": []}))
+    expect_fail("fail-open 2: deny as a string fails C-set-3", "C-set-3",
+                mutate=lambda d: d.setdefault("permissions", {}).update({"deny": "Read(~/.ssh/**)"}))
+    expect_fail("fail-open 2: a non-string deny entry fails C-set-3", "C-set-3",
+                mutate=lambda d: deny(d).append(3))
+    expect_fail("fail-open 2: hooks as a string fails C-set-4", "C-set-4",
+                mutate=lambda d: d.update({"hooks": "x"}))
+    expect_fail("fail-open 2: a hook command that is a list fails C-set-4", "C-set-4",
+                mutate=lambda d: d.update({"hooks": {"PreToolUse": [{"hooks": [
+                    {"type": "command", "command": ["/opt/x/run"]}]}]}}))
+
+
+def test_failopen_commands():
+    """Every setting that runs a command is scanned for paths outside the tree."""
+    for label, mut in (
+        ("statusLine command, absolute", lambda d: d.update(
+            {"statusLine": {"type": "command", "command": "/opt/x/status"}})),
+        ("statusLine command, parent path", lambda d: d.update(
+            {"statusLine": {"type": "command", "command": "../x/status"}})),
+        ("statusLine command, home path", lambda d: d.update(
+            {"statusLine": {"type": "command", "command": "~/status"}})),
+        ("apiKeyHelper, absolute", lambda d: d.update({"apiKeyHelper": "/opt/x/key"})),
+        ("apiKeyHelper, parent path", lambda d: d.update({"apiKeyHelper": "../x/key"})),
+        ("awsAuthRefresh, absolute", lambda d: d.update({"awsAuthRefresh": "/opt/x/aws"})),
+        ("awsCredentialExport, absolute", lambda d: d.update({"awsCredentialExport": "/opt/x/aws"})),
+        ("otelHeadersHelper, absolute", lambda d: d.update({"otelHeadersHelper": "/opt/x/otel"})),
+        ("a command nested under another key", lambda d: d.update(
+            {"fileSuggestion": {"type": "command", "command": "/opt/x/files"}})),
+        ("an apiKeyHelper that is not a string", lambda d: d.update({"apiKeyHelper": ["/opt/x/key"]})),
+    ):
+        expect_fail("fail-open 3: %s fails C-set-4" % label, "C-set-4", mutate=mut)
+    expect_pass("fail-open 3: control, statusLine command inside the tree passes C-set-4", "C-set-4",
+                mutate=lambda d: d.update({"statusLine": {"type": "command", "command": "./lab/status"}}))
+    expect_pass("fail-open 3: control, apiKeyHelper inside the tree passes C-set-4", "C-set-4",
+                mutate=lambda d: d.update({"apiKeyHelper": "./lab/key"}))
+
+
+def test_failopen_unreadable():
+    can_fail = hasattr(os, "geteuid") and os.geteuid() != 0
+
+    def lock(proj):
+        os.chmod(os.path.join(proj, "lab", "locked.txt"), 0)
+
+    if can_fail:
+        expect_fail_all("fail-open 4: an unreadable kit file fails C-set-1", ["C-set-1"],
+                        extra_files={"lab/locked.txt": "x\n"}, setup=lock)
+    else:
+        record("fail-open 4: an unreadable kit file fails C-set-1 (skipped, running as root)", True)
+
+    def lock_dir(proj):
+        os.chmod(os.path.join(proj, "lab", "sub"), 0)
+
+    if can_fail:
+        expect_fail_all("fail-open 4: an unreadable kit directory fails C-set-1", ["C-set-1"],
+                        extra_files={"lab/sub/x.txt": "x\n"}, setup=lock_dir)
+    else:
+        record("fail-open 4: an unreadable kit directory fails C-set-1 (skipped, running as root)", True)
+    # Control: a readable tree with a subdirectory still passes.
+    proj = make_project(extra_files={"lab/sub/x.txt": "x\n"})
+    rc, out = check_project(proj)
+    record("fail-open 4: control, a readable kit subdirectory passes C-set-1",
+           line_status(out, "C-set-1") == "PASS", "got %r: %s" % (line_status(out, "C-set-1"), (out or "")[:200]))
+
+
+def test_failopen_user_settings():
+    can_fail = hasattr(os, "geteuid") and os.geteuid() != 0
+    if not can_fail:
+        record("fail-open 5: unreadable user settings fail C-set-5 (skipped, running as root)", True)
+        return
+    home = new_dir("home")
+    write_user_settings(home, '{"theme": "dark"}\n')
+    os.chmod(os.path.join(home, ".claude", "settings.json"), 0)
+    snap = os.path.join(scratch_root, "snap-u1")
+    rc1, out1 = run_check(["--user-snapshot", snap], home)
+    record("fail-open 5: a snapshot of unreadable user settings exits 1",
+           rc1 == 1 and "unreadable" in (out1 or "").lower(), "rc %r: %s" % (rc1, (out1 or "")[:200]))
+    # Hand-written snapshot that records the unreadable state, then verify
+    # while the file is still unreadable: the old code passed this.
+    snap = os.path.join(scratch_root, "snap-u2")
+    with open(snap, "w", encoding="utf-8") as fh:
+        fh.write("unreadable:Permission denied\n")
+    rc, out = run_check(["--user-verify", snap], home)
+    record("fail-open 5: unreadable user settings before and after fail C-set-5",
+           rc == 1 and line_status(out, "C-set-5") == "FAIL", "rc %r: %s" % (rc, (out or "")[:200]))
+    # A readable snapshot against a file that became unreadable also fails.
+    home2 = new_dir("home")
+    write_user_settings(home2, '{"theme": "dark"}\n')
+    snap = os.path.join(scratch_root, "snap-u3")
+    run_check(["--user-snapshot", snap], home2)
+    os.chmod(os.path.join(home2, ".claude", "settings.json"), 0)
+    rc, out = run_check(["--user-verify", snap], home2)
+    record("fail-open 5: user settings that became unreadable fail C-set-5",
+           rc == 1 and line_status(out, "C-set-5") == "FAIL", "rc %r: %s" % (rc, (out or "")[:200]))
+    # Control: a readable file still passes.
+    home3 = new_dir("home")
+    write_user_settings(home3, '{"theme": "dark"}\n')
+    snap = os.path.join(scratch_root, "snap-u4")
+    run_check(["--user-snapshot", snap], home3)
+    rc, out = run_check(["--user-verify", snap], home3)
+    record("fail-open 5: control, readable user settings still pass C-set-5",
+           rc == 0 and line_status(out, "C-set-5") == "PASS", "rc %r: %s" % (rc, (out or "")[:200]))
+
+
 def main():
     print("home for this run is a scratch directory under", scratch_root)
     for fn in (test_baseline, test_cset1, test_cset2, test_cset3, test_cset4,
-               test_input_errors, test_cset5, test_no_writes_to_home):
+               test_input_errors, test_cset5, test_no_writes_to_home,
+               test_failopen_first_word, test_failopen_types, test_failopen_commands,
+               test_failopen_unreadable, test_failopen_user_settings):
         fn()
     passed = sum(1 for _, ok, _ in results if ok)
     failed = len(results) - passed
