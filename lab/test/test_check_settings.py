@@ -796,7 +796,7 @@ def test_round8_denies():
                "deny is %r" % shipped.get("deny"))
         expect_fail("round 8: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
                     mutate=lambda d, r=rule: allow(d).append(r))
-    record("round 8: the shipped deny list has 20 entries", len(shipped.get("deny", [])) == 20,
+    record("round 8: the shipped deny list has 23 entries", len(shipped.get("deny", [])) == 23,
            "count %r" % len(shipped.get("deny", [])))
     # Removing only one of the two leaves C-set-3 FAIL naming the other.
     for rule in ("Edit(./lab/report)", "Read(./lab/deny-probe)"):
@@ -836,6 +836,51 @@ def test_justfile_denies():
     # Look-alikes stay allowed.
     for rule in ("Edit(./lab/mod.justx)", "Edit(./lab/justfiles)", "Read(./lab/justfile)", "Read(./lab/mod.just)"):
         expect_pass("justfile denies: control, %s as an allow passes C-set-2" % rule, "C-set-2",
+                    mutate=lambda d, r=rule: allow(d).append(r))
+
+
+def test_roots_of_trust():
+    """The files the digest check cannot cover, because they do the checking
+    or choose what runs, each carry an Edit deny that check-settings requires:
+    lab/run, lab.lock, lab/check-settings (already required), and lab.just,
+    the justfile and .claude/settings.json (outside the Edit(./lab/**) allow,
+    so without a deny they would prompt, not refuse). Each is in the shipped
+    file, may not also be an allow, and its removal makes C-set-3 FAIL."""
+    shipped = (load_settings() or {}).get("permissions", {})
+    for rule in ("Edit(./lab/run)", "Edit(./lab.lock)", "Edit(./lab/check-settings)",
+                 "Edit(./lab.just)", "Edit(./justfile)", "Edit(./.claude/settings.json)"):
+        record("roots: the shipped deny list holds %s" % rule, rule in shipped.get("deny", []),
+               "deny is %r" % shipped.get("deny"))
+        expect_fail("roots: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
+                    mutate=lambda d, r=rule: allow(d).append(r))
+        proj = make_project(mutate=lambda d, r=rule: d["permissions"].update(
+            {"deny": [x for x in d["permissions"]["deny"] if x != r]}))
+        rc, out = check_project(proj)
+        line = [l for l in (out or "").splitlines() if l.startswith("C-set-3")]
+        record("roots: without %s the C-set-3 line FAILs and names it" % rule,
+               rc == 1 and bool(line) and "FAIL" in line[0] and rule in line[0], "line %r" % line)
+    for rule in ("Edit(./lab.justx)", "Edit(./justfiles)", "Read(./lab.just)", "Read(./justfile)",
+                 "Read(./.claude/settings.json)"):
+        expect_pass("roots: control, %s as an allow passes C-set-2" % rule, "C-set-2",
+                    mutate=lambda d, r=rule: allow(d).append(r))
+
+
+def test_no_allowed_bash_writes_a_root():
+    """No allowed Bash pattern can write a root. The shipped Bash allows are
+    exactly the nine granted lines, and every writer-shaped or wider Bash
+    allow fails C-set-2."""
+    shipped = (load_settings() or {}).get("permissions", {})
+    bash = sorted(r for r in shipped.get("allow", []) if r.startswith("Bash("))
+    want = sorted("Bash(%s:*)" % w for w in (
+        "marvel get", "marvel doctor", "marvel capture", "marvel events",
+        "bd show", "bd ready", "just lab rung", "just lab check", "just lab report"))
+    record("no writer: the shipped Bash allows are exactly the nine granted lines", bash == want, "got %r" % bash)
+    for rule in ("Bash(tee:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(sed -i:*)", "Bash(git checkout:*)",
+                 "Bash(git:*)", "Bash(just:*)", "Bash(just lab:*)", "Bash(just --justfile x lab report:*)",
+                 "Bash(just lab report > lab.lock:*)", "Bash(lab/run:*)", "Bash(./lab/run:*)",
+                 "Bash(marvel:*)", "Bash(bd:*)", "Bash(bd update:*)", "Bash(touch:*)", "Bash(dd:*)",
+                 "Bash(install:*)", "Bash(ln:*)", "Bash(perl:*)", "Bash(awk:*)", "Bash(just lab report;touch lab.lock:*)"):
+        expect_fail("no writer: %s as an allow fails C-set-2" % rule, "C-set-2",
                     mutate=lambda d, r=rule: allow(d).append(r))
 
 
@@ -965,7 +1010,8 @@ def main():
                test_input_errors, test_cset5, test_no_writes_to_home,
                test_failopen_first_word, test_allowlist, test_tool_allowlist, test_key_allowlist, test_no_commands,
                test_lab_scope, test_parsed_keys, test_override_files, test_fold_override_names,
-               test_round8_denies, test_justfile_denies, test_failopen_types, test_failopen_commands,
+               test_round8_denies, test_justfile_denies, test_roots_of_trust,
+               test_no_allowed_bash_writes_a_root, test_failopen_types, test_failopen_commands,
                test_failopen_unreadable, test_failopen_user_settings):
         fn()
     passed = sum(1 for _, ok, _ in results if ok)

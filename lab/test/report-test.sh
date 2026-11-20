@@ -272,6 +272,7 @@ ghargs() { if [[ -f $FX/gh.args ]]; then tr '\n' ' ' <"$FX/gh.args"; fi; }
 rfix() {
   RFX=$((RFX + 1))
   fixture "$1.$RFX"
+  [[ -n ${NOSTATE:-} ]] || mkdir -p "$FX/lab/state"
   printf '%s\n' '#!/usr/bin/env bash' 'echo "RUNG 04 PASS"' >"$FX/lab/check/04-demo.sh"
   printf '%s\n' '#!/bin/sh' '[ "$1" = "-un" ] && echo labuser9 || /usr/bin/id "$@"' >"$FX/bin/id"
   printf '%s\n' '#!/bin/sh' 'if [ "${1:-}" = "-s" ]; then echo lab-host-9; else echo lab-host-9.example.invalid; fi' >"$FX/bin/hostname"
@@ -304,8 +305,8 @@ printf '%s\n' 'version stubtool 1.0.0 stubtool --version' >>"$FX/lab.lock"
 printf '%s\n' '#!/bin/sh' 'echo "stubtool 1.0.0"' >"$FX/bin/stubtool"
 chmod +x "$FX/bin/stubtool"
 printf '%s\n' "workload ticker $(printf 'a%.0s' $(seq 1 64))" >>"$FX/lab.lock"
-printf '%s\n' '- expected: Read(./lab/deny-probe) denied by a deny rule' 'prompted once for lab/run check' >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+printf '%s\n' '- expected: Read(./lab/deny-probe) denied by a deny rule' 'prompted once for lab/run check' >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 expect "report: exits 0" "$RC" 0
 expect "report: line 1 is the header" "$(printf '%s\n' "$OUT" | sed -n 1p)" "LAB REPORT 1"
 expect "report: line 2 names the rung" "$(printf '%s\n' "$OUT" | sed -n 2p)" "rung 04"
@@ -359,8 +360,8 @@ expect "report: no denials file ends with none" "$(printf '%s\n' "$OUT" | tail -
 printf '%s\n' "$OUT" >"$FX/r3.txt"
 verify "$FX/r3.txt"
 expect "C-rep-2: the verifier accepts the minimal report" "$VRC" 0
-: >"$FX/empty.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/empty.txt"
+: >"$FX/lab/state/empty.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/empty.txt
 expect "report: an empty denials file ends with none" "$(printf '%s\n' "$OUT" | tail -1)" "none"
 
 # R4: free text is made safe: control characters stripped, lines capped, a
@@ -372,8 +373,8 @@ long=$(printf 'x%.0s' $(seq 1 300))
   printf '%s\n' "$long"
   printf '%s\n' 'nonce ZZZZZZZZ99999999' 'LAB REPORT 1' 'RUNG 04 PASS' 'workload none pinned' 'denials and prompts'
   for i in $(seq 1 30); do printf 'line %s\n' "$i"; done
-} >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+} >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 expect "report: a messy denials file still exits 0" "$RC" 0
 expect_not "report: no escape character survives" "$OUT" "$(printf '\033')"
 expect_not "report: no carriage return survives" "$OUT" "$(printf '\r')"
@@ -397,8 +398,8 @@ lock
 {
   printf '%s\n' "denied Read($FX/.ssh/key) for labuser9 on lab-host-9.example.invalid, short name lab-host-9"
   printf '%s\n' "second: $FX and labuser9 again, host lab-host-9.example.invalid"
-} >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+} >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 expect "addition A: exits 0" "$RC" 0
 expect_not "addition A: the home directory does not appear" "$OUT" "$FX"
 expect_not "addition A: the user name does not appear" "$OUT" "labuser9"
@@ -412,13 +413,13 @@ printf '%s\n' "$OUT" >"$FX/r5.txt"
 verify "$FX/r5.txt"
 expect "addition A: the verifier still accepts the substituted report" "$VRC" 0
 # Words that only contain the user name are not touched.
-printf '%s\n' 'mylabuser9 labuser9x labuser9_y' >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+printf '%s\n' 'mylabuser9 labuser9x labuser9_y' >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 expect_has "addition A: a word containing the user name stays" "$OUT" "- mylabuser9 labuser9x labuser9_y"
 # The macOS names: LocalHostName (and its .local form) and ComputerName differ
 # from hostname and hostname -s, and every one of them becomes <host>.
-printf '%s\n' 'bonjour lab-local-9.local, bare lab-local-9, named Lab Mac 9, and lab-local-9x stays' >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+printf '%s\n' 'bonjour lab-local-9.local, bare lab-local-9, named Lab Mac 9, and lab-local-9x stays' >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 expect_not "host forms: the .local name does not appear" "$OUT" "lab-local-9.local"
 expect_not "host forms: the ComputerName does not appear" "$OUT" "Lab Mac 9"
 expect_has "host forms: the .local name and the bare name both become <host>" "$OUT" "- bonjour <host>, bare <host>, named <host>, and lab-local-9x stays"
@@ -426,11 +427,11 @@ expect_has "host forms: the .local name and the bare name both become <host>" "$
 # and no fragment of it leaks.
 rfix r5c
 printf '%s\n' '#!/bin/sh' 'case "$*" in "--get ComputerName") echo "Pat'"'"'s Lab Mac" ;; *) exit 1 ;; esac' >"$FX/bin/scutil"
-printf '%s\n' "owned by Pat's Lab Mac, not Pat's Lab Macintosh" >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+printf '%s\n' "owned by Pat's Lab Mac, not Pat's Lab Macintosh" >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 expect_has "host forms: a ComputerName with spaces and an apostrophe reads <host> as one string" "$OUT" "- owned by <host>, not Pat's Lab Macintosh"
-printf '%s\n' "owned by Pat's Lab Mac" >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+printf '%s\n' "owned by Pat's Lab Mac" >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 expect "host forms: nothing of the ComputerName is left beside <host>" "$(printf '%s\n' "$OUT" | tail -1)" "- owned by <host>"
 for frag in "Pat" "'s" "Lab" "Mac"; do
   expect_not "host forms: the fragment [$frag] does not leak" "$(printf '%s\n' "$OUT" | tail -1)" "$frag"
@@ -439,8 +440,8 @@ done
 for mode in 'exit 1' 'exit 0' 'echo ""' 'echo oops >&2; exit 2'; do
   rfix r5d
   printf '%s\n' '#!/bin/sh' "$mode" >"$FX/bin/scutil"
-  printf '%s\n' 'nothing to hide labuser9 on lab-host-9' >"$FX/denials.txt"
-  rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+  printf '%s\n' 'nothing to hide labuser9 on lab-host-9' >"$FX/lab/state/denials.txt"
+  rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
   expect "host forms: scutil [$mode] does not fail the report" "$RC" 0
   expect_has "host forms: scutil [$mode] leaves the other forms replaced" "$OUT" "- nothing to hide <user> on <host>"
 done
@@ -454,21 +455,21 @@ done
 mv "$FX/bin/scutil" "$FX/bin/scutil.gone"
 nopath="$FX/bin:$FX/tools"
 expect "host forms: the control PATH has no scutil" "$(PATH=$nopath command -v scutil || echo none)" "none"
-printf '%s\n' 'nothing to hide labuser9 on lab-host-9' >"$FX/denials.txt"
-EXTRA_ENV="PATH=$nopath" rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+printf '%s\n' 'nothing to hide labuser9 on lab-host-9' >"$FX/lab/state/denials.txt"
+EXTRA_ENV="PATH=$nopath" rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 expect "host forms: no scutil at all does not fail the report" "$RC" 0
 expect_has "host forms: no scutil at all leaves the other forms replaced" "$OUT" "- nothing to hide <user> on <host>"
 # A HOME of / or empty is not substituted (that would rewrite every path).
-printf '%s\n' 'see /etc/hosts' >"$FX/denials.txt"
-OUT=$(cd "$FX" && env -i HOME=/ TMPDIR="$WORK" PATH="$FX/bin:$PATH" "$FX/lab/run" exec lab/report 04 --nonce "$NONCE" --denials "$FX/denials.txt" 2>&1) && RC=0 || RC=$?
+printf '%s\n' 'see /etc/hosts' >"$FX/lab/state/denials.txt"
+OUT=$(cd "$FX" && env -i HOME=/ TMPDIR="$WORK" PATH="$FX/bin:$PATH" "$FX/lab/run" exec lab/report 04 --nonce "$NONCE" --denials lab/state/denials.txt 2>&1) && RC=0 || RC=$?
 expect_has "addition A: a HOME of / leaves other paths alone" "$OUT" "- see /etc/hosts"
 
 # R6: the dry run prints exactly the bytes --post sends (ruling addition A).
 rfix r6
-printf '%s\n' 'denied something labuser9' >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+printf '%s\n' 'denied something labuser9' >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 printf '%s\n' "$OUT" >"$FX/dry.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt" --post --issue 7
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt --post --issue 7
 expect "post: exits 0" "$RC" 0
 expect "post: the posted body is the dry-run text, byte for byte" "$( { cat "$FX/gh.stdin" 2>/dev/null || true; } | shasum -a 256 | cut -d' ' -f1)" "$(shasum -a 256 <"$FX/dry.txt" | cut -d' ' -f1)"
 expect "post: stdout with --post is the same text" "$OUT" "$(cat "$FX/dry.txt")"
@@ -530,6 +531,52 @@ rfix o-ghfail
 EXTRA_ENV="GH_STUB_EXIT=1" rep 04 --nonce "$NONCE" --post --issue 7
 expect "post: a failing gh exits 1" "$RC" 1
 expect_has "post: a failing gh is reported" "$ERR" "post failed"
+
+# The denials path: only lab/state/<plain names> under the tree root, never a
+# symlink, never read from anywhere else. An agent can pass any path to the
+# recipe, so the script must not be a way to post a file it cannot read itself.
+rfix d1
+printf '%s\n' '-----BEGIN FAKE KEY----- do not post me' >"$FX/outside-key"
+printf '%s\n' 'fine text' >"$FX/lab/state/ok.txt"
+mkdir -p "$FX/elsewhere"
+printf '%s\n' '-----BEGIN FAKE KEY----- via a link' >"$FX/elsewhere/key"
+ln -s ../../outside-key "$FX/lab/state/link.txt"
+printf '%s\n' '-----BEGIN FAKE KEY----- by name' >"$FX/lab/state-x.txt"
+for p in "$FX/outside-key" "outside-key" "./outside-key" "lab/state/../../outside-key" "lab/state/../outside-key" \
+  "lab/state/./ok.txt" "lab/state//ok.txt" "lab/state/link.txt" "lab/state" "lab/state/" "lab/state-x.txt" "lab/ok.txt" \
+  "/etc/hosts" "~/x" 'lab/state/$HOME' "lab/state/a b" "LAB/state/ok.txt" "lab/state/ok.txt/"; do
+  rep 04 --nonce "$NONCE" --denials "$p"
+  expect "denials path [$p] is refused with exit 2" "$RC" 2
+  expect_has "denials path [$p] says it refuses" "$ERR" "refus"
+  expect_not "denials path [$p] leaks nothing of the file" "$OUT" "FAKE KEY"
+done
+rep 04 --nonce "$NONCE" --denials "$FX/outside-key" --post --issue 7
+expect "denials: an outside file with --post exits 2" "$RC" 2
+absent "denials: an outside file with --post never reaches gh" "$FX/gh.args"
+rep 04 --nonce "$NONCE" --denials lab/state/ok.txt
+expect "denials: control, a plain file in lab/state is read" "$RC" 0
+expect_has "denials: control, its text is in the report" "$OUT" "- fine text"
+printf '%s\n' 'nested ok' >"$FX/lab/state/ok2.txt"
+mkdir -p "$FX/lab/state/sub"
+printf '%s\n' 'nested file text' >"$FX/lab/state/sub/n.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/sub/n.txt
+expect_has "denials: control, a nested plain path is read" "$OUT" "- nested file text"
+# A symlinked lab/state directory is refused even with a plain file name.
+NOSTATE=1 rfix d2
+mkdir -p "$FX/elsewhere"
+printf '%s\n' '-----BEGIN FAKE KEY----- via a linked dir' >"$FX/elsewhere/ok.txt"
+ln -s ../elsewhere "$FX/lab/state"
+rep 04 --nonce "$NONCE" --denials lab/state/ok.txt
+expect "denials: a symlinked lab/state directory is refused (exit 2)" "$RC" 2
+expect_not "denials: a symlinked lab/state directory leaks nothing" "$OUT" "FAKE KEY"
+# A symlinked sub directory inside lab/state is refused too.
+rfix d3
+mkdir -p "$FX/elsewhere"
+printf '%s\n' '-----BEGIN FAKE KEY----- via a linked sub' >"$FX/elsewhere/ok.txt"
+ln -s ../../elsewhere "$FX/lab/state/sub"
+rep 04 --nonce "$NONCE" --denials lab/state/sub/ok.txt
+expect "denials: a symlinked directory inside lab/state is refused (exit 2)" "$RC" 2
+expect_not "denials: a symlinked directory inside lab/state leaks nothing" "$OUT" "FAKE KEY"
 
 # Addition B: a body the verifier rejects is never posted; exit 0 and 3 post.
 rfix b1
@@ -614,8 +661,8 @@ rfix v1
 printf '%s\n' 'version stubtool 1.0.0 stubtool --version' >>"$FX/lab.lock"
 printf '%s\n' '#!/bin/sh' 'echo "stubtool 1.0.0"' >"$FX/bin/stubtool"
 chmod +x "$FX/bin/stubtool"
-printf '%s\n' 'a denied read' >"$FX/denials.txt"
-rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+printf '%s\n' 'a denied read' >"$FX/lab/state/denials.txt"
+rep 04 --nonce "$NONCE" --denials lab/state/denials.txt
 printf '%s\n' "$OUT" >"$FX/good.txt"
 verify "$FX/good.txt"
 expect "verifier: the control report is accepted" "$VRC" 0

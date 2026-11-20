@@ -152,6 +152,25 @@ else
   bad "the recipe fixture needs just, justfile and lab.just"
 fi
 
+# --- the roots of trust: HARNESS.md names them, settings.json denies Edit on them
+if [[ -f $ROOT/lab/HARNESS.md ]]; then
+  harness=$(cat "$ROOT/lab/HARNESS.md")
+  expect_has "roots: HARNESS.md has a roots of trust section" "$harness" "## The roots of trust"
+  roots_text=$(awk '/^## The roots of trust/{f=1;next} /^## /{f=0} f' "$ROOT/lab/HARNESS.md")
+  settings=$(cat "$ROOT/.claude/settings.json")
+  for r in lab/run lab.lock lab.just justfile .claude/settings.json lab/check-settings; do
+    expect_has "roots: the section names $r" "$roots_text" "\`$r\`"
+    expect_has "roots: settings.json denies Edit on $r" "$settings" "\"Edit(./$r)\""
+  done
+else
+  bad "roots: lab/HARNESS.md is missing"
+fi
+# No recipe in lab.just writes a root through a redirect.
+if [[ -f $ROOT/lab.just ]]; then
+  hits=$(grep -nE '>[[:space:]]*(\./)?(lab/run|lab\.lock|lab\.just|justfile|\.claude/|lab/check-settings)' "$ROOT/lab.just" || true)
+  expect "roots: no lab.just recipe redirects into a root" "$hits" ""
+fi
+
 # --- no private or machine-specific text in the skeleton --------------------
 # The patterns are built from parts so this file does not contain them itself.
 userpath="/Use""rs/"
