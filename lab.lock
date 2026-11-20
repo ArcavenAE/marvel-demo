@@ -1,0 +1,12 @@
+# lab.lock: what the check harness (lab/run) compares against.
+#
+#   version <name> <expected> <command words...>
+#     The command is run as written (no shell); its first output line must
+#     contain <expected>. A different or missing version prints a WARN and does
+#     not fail the run.
+#
+#   digest <path> <sha256>
+#     The sha256 of a check script. A script whose digest differs, or that has
+#     no line here, FAILs and is not run. `lab/run digests` prints the lines.
+#
+# No checks or versions are pinned yet; they arrive with the rungs.
