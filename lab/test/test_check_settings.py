@@ -422,8 +422,80 @@ def test_failopen_first_word():
     # starts like a shell, must not trip the first-word rule.
     expect_pass("fail-open 1: control, Bash(marvel get:*) passes C-set-2", "C-set-2",
                 mutate=lambda d: allow(d).append("Bash(marvel get:*)"))
-    expect_pass("fail-open 1: control, Bash(bashful lab:*) passes C-set-2", "C-set-2",
+    # A word that only starts like a shell is not on the grant list either.
+    expect_fail("fail-open 1: Bash(bashful lab:*) is not a granted line", "C-set-2",
                 mutate=lambda d: allow(d).append("Bash(bashful lab:*)"))
+
+
+GRANTED_LINES = [
+    "Bash(marvel get:*)", "Bash(marvel doctor:*)", "Bash(marvel capture:*)",
+    "Bash(marvel events:*)", "Bash(bd show:*)", "Bash(bd ready:*)",
+    "Bash(just lab rung:*)", "Bash(just lab check:*)", "Bash(just lab report:*)",
+]
+
+
+def test_allowlist():
+    """C-set-2 on a Bash allow is an allowlist: only the F1 grant lines pass,
+    each with its required verb. Everything else FAILs, whatever it is."""
+    classes = [
+        ("wrapper", ["command bash", "nice bash", "timeout 5 bash", "nohup bash", "time bash",
+                     "stdbuf -o0 bash", "doas bash", "su root", "watch bash", "script -c bash",
+                     "command marvel get", "nice marvel get", "timeout 5 marvel get",
+                     "nohup marvel get", "time marvel get", "stdbuf -o0 marvel get"]),
+        ("off-list shell or interpreter", ["fish -c x", "dash -c x", "ksh -c x", "osascript -e x",
+                                           "awk x", "php -r x", "lua -e x", "deno run x",
+                                           "bun run x", "uv run x", "uvx x", "pwsh -c x",
+                                           "tclsh x", "jq x", "sed x", "find x"]),
+        ("exec path", ["find . -exec sh", "make x", "git x", "git config x", "xargs sh", "rsync x"]),
+        ("spelling of a shell", ["Bash -c", "BASH -c", "'bash' -c", "\"bash\" -c", "\\bash -c",
+                                 "b'a'sh -c", "ba\\sh -c", "/bin/bash -c", "./bash -c",
+                                 "bash\t-c"]),
+        ("case of a granted word", ["Marvel get", "MARVEL get", "marvel GET", "Bd show", "BD show",
+                                    "Just lab rung", "just LAB rung", "just lab RUNG"]),
+        ("granted word without its verb", ["marvel", "bd", "just", "just lab", "marvel getx",
+                                           "marvel gets", "bd showx", "just lab rungs",
+                                           "just labs rung", "just rung"]),
+        ("other verb of a granted word", ["marvel inject", "marvel attach", "marvel keys authorize",
+                                          "marvel config add-cluster", "marvel apply",
+                                          "marvel daemon", "bd create", "bd close", "bd update",
+                                          "bd sql", "just deploy", "just lab teardown",
+                                          "just lab", "just --list", "just -f x lab rung"]),
+        ("other tool", ["gh pr", "tmux send-keys", "security find-generic-password", "ls", "cat x",
+                        "echo x", "cp x y", "mv x y", "ssh h", "curl x"]),
+        ("leading assignment or path", ["A=1 marvel get", "PATH=. marvel get", "./marvel get",
+                                        "/usr/bin/marvel get", "../marvel get", "~/marvel get"]),
+        ("shell metacharacter in the prefix", ["marvel get; bash", "marvel get && x", "marvel get | sh",
+                                               "marvel get $(x)", "marvel get `x`", "marvel get > x",
+                                               "marvel get < x", "marvel get\nbash", "marvel get &",
+                                               "bd show (x)", "bd show {x}", "bd show #x",
+                                               "just lab rung !x", "just lab rung ~x"]),
+    ]
+    for label, specs in classes:
+        for spec in specs:
+            rule = "Bash(%s:*)" % spec
+            expect_fail("allowlist: %s: %s fails C-set-2" % (label, spec.replace("\n", "\\n").replace("\t", "\\t")),
+                        "C-set-2", mutate=lambda d, r=rule: allow(d).append(r))
+    # The wildcard form with a space also has to meet the list.
+    expect_fail("allowlist: Bash(bash -c *) with a space wildcard fails C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Bash(bash -c *)"))
+    expect_fail("allowlist: Bash(marvel get) with no wildcard but a bad verb fails C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Bash(marvel inject)"))
+    # Positive controls: each granted line passes alone, with extra arguments,
+    # and in the space-wildcard spelling.
+    for line in GRANTED_LINES:
+        expect_pass("allowlist: control, %s passes C-set-2" % line, "C-set-2",
+                    mutate=lambda d, r=line: allow(d).append(r))
+    for spec in ("marvel get pods", "marvel doctor --json", "marvel capture desk1", "marvel events --since 5m",
+                 "bd show x-1", "bd ready", "just lab rung 03", "just lab check 03", "just lab report 03"):
+        expect_pass("allowlist: control, Bash(%s:*) passes C-set-2" % spec, "C-set-2",
+                    mutate=lambda d, r="Bash(%s:*)" % spec: allow(d).append(r))
+    expect_pass("allowlist: control, Bash(marvel get *) with a space wildcard passes C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Bash(marvel get *)"))
+    # The shipped file carries exactly the granted Bash lines.
+    base = load_settings()
+    shipped = sorted(r for r in (base or {}).get("permissions", {}).get("allow", []) if r.startswith("Bash("))
+    record("allowlist: the shipped Bash allows are exactly the granted lines",
+           shipped == sorted(GRANTED_LINES), "shipped %r" % shipped)
 
 
 def test_failopen_types():
@@ -550,7 +622,7 @@ def main():
     print("home for this run is a scratch directory under", scratch_root)
     for fn in (test_baseline, test_cset1, test_cset2, test_cset3, test_cset4,
                test_input_errors, test_cset5, test_no_writes_to_home,
-               test_failopen_first_word, test_failopen_types, test_failopen_commands,
+               test_failopen_first_word, test_allowlist, test_failopen_types, test_failopen_commands,
                test_failopen_unreadable, test_failopen_user_settings):
         fn()
     passed = sum(1 for _, ok, _ in results if ok)
