@@ -661,6 +661,72 @@ def test_parsed_keys():
                 extra_files={"lab/ok.txt": "{not json at all\n"})
 
 
+def test_override_files():
+    """Round 5: Claude Code applies .claude/settings.local.json over the shared
+    file and reads MCP servers from .mcp.json, so either file anywhere in the
+    kit FAILs C-set-2, whatever it holds."""
+    benign = "{}\n"
+    harmful = '{"permissions": {"allow": ["Bash(*)"]}, "enabledPlugins": {"x@y": true}}\n'
+    mcp = '{"mcpServers": {"s": {"command": "x"}}}\n'
+    places = ["", ".claude/", "lab/", "lab/sub/deep/", "x/.claude/", ".claude/lab/"]
+    for name, bodies in (("settings.local.json", (benign, harmful)), (".mcp.json", (benign, mcp))):
+        for place in places:
+            for body in bodies:
+                kind = "benign" if body == benign else "harmful"
+                expect_fail("override files: %s%s (%s) fails C-set-2" % (place, name, kind), "C-set-2",
+                            extra_files={place + name: body})
+    # Empty file, and a file that is not JSON: existence alone FAILs.
+    expect_fail("override files: an empty .claude/settings.local.json fails C-set-2", "C-set-2",
+                extra_files={".claude/settings.local.json": ""})
+    expect_fail("override files: a non-JSON .mcp.json fails C-set-2", "C-set-2",
+                extra_files={".mcp.json": "not json\n"})
+    # Case variants resolve to the same file on a case-insensitive filesystem.
+    for rel in (".claude/Settings.local.json", ".claude/SETTINGS.LOCAL.JSON", ".claude/settings.LOCAL.json",
+                ".MCP.json", ".Mcp.JSON"):
+        expect_fail("override files: the case variant %s fails C-set-2" % rel, "C-set-2",
+                    extra_files={rel: benign})
+
+    def link_mcp(proj):
+        os.symlink("/nonexistent/target", os.path.join(proj, ".mcp.json"))
+
+    def dir_mcp(proj):
+        os.makedirs(os.path.join(proj, "lab", ".mcp.json"))
+
+    def link_local(proj):
+        os.symlink("../lab/x", os.path.join(proj, ".claude", "settings.local.json"))
+
+    expect_fail_all("override files: a broken symlink named .mcp.json fails C-set-2", ["C-set-2"], setup=link_mcp)
+    expect_fail_all("override files: a directory named .mcp.json fails C-set-2", ["C-set-2"], setup=dir_mcp)
+    expect_fail_all("override files: a symlink named settings.local.json fails C-set-2", ["C-set-2"],
+                    setup=link_local)
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        def hide(proj):
+            os.chmod(os.path.join(proj, "lab", "hidden"), 0)
+
+        expect_fail_all("override files: an unreadable directory that could hide one fails C-set-2", ["C-set-2"],
+                        extra_files={"lab/hidden/x.txt": "x\n"}, setup=hide)
+    else:
+        record("override files: an unreadable directory that could hide one fails C-set-2 (skipped, root)", True)
+    # Controls: look-alike names and the shipped tree pass C-set-2.
+    for rel in (".claude/settings.local.json.example", ".claude/settings.local.json.bak",
+                ".claude/settings.local.json~", "settings.local.jsonx", "xsettings.local.json",
+                "mcp.json", ".claude/mcp.json", ".mcp.json.example", "my.mcp.json", ".mcp.jsonl",
+                ".claude/settings.json.local", ".claude/local.settings.json", "lab/settings.local",
+                ".claude/settings.local", ".mcp", "lab/mcp.json"):
+        expect_pass("override files: control, %s passes C-set-2" % rel, "C-set-2",
+                    extra_files={rel: benign})
+    expect_pass("override files: control, the shipped tree passes C-set-2", "C-set-2")
+    # The real tree carries neither file.
+    found = []
+    for dp, dn, fn in os.walk(REPO):
+        dn[:] = [d for d in dn if d != ".git"]
+        for f in dn + fn:
+            if f.lower() in ("settings.local.json", ".mcp.json"):
+                found.append(os.path.join(dp, f))
+    record("override files: the real kit tree has neither file, and has the settings file",
+           not found and os.path.exists(SETTINGS), "found %r" % found)
+
+
 def test_failopen_types():
     """A value of the wrong type must fail, never be skipped."""
     expect_fail_all("fail-open 2: allow as a string fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
@@ -786,7 +852,7 @@ def main():
     for fn in (test_baseline, test_cset1, test_cset2, test_cset3, test_cset4,
                test_input_errors, test_cset5, test_no_writes_to_home,
                test_failopen_first_word, test_allowlist, test_tool_allowlist, test_key_allowlist, test_no_commands,
-               test_lab_scope, test_parsed_keys, test_failopen_types, test_failopen_commands,
+               test_lab_scope, test_parsed_keys, test_override_files, test_failopen_types, test_failopen_commands,
                test_failopen_unreadable, test_failopen_user_settings):
         fn()
     passed = sum(1 for _, ok, _ in results if ok)
