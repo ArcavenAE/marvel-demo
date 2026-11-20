@@ -125,6 +125,30 @@ if command -v just >/dev/null 2>&1 && [[ -f $ROOT/justfile && -f $ROOT/lab.just 
   # An id is data, never shell text.
   lab check '1; touch "'"$FX"'/pwned"'
   if [[ -e $FX/pwned ]]; then bad "an id was run as shell"; else ok "an id is not run as shell"; fi
+
+  # A rung id is a number with an optional letter, and nothing else: rung and
+  # report refuse anything else before using it, so an id cannot walk out of
+  # lab/rung or reach a script it was not meant for.
+  mkdir -p "$FX/lab/rung/1" "$WORK/outside"
+  printf '%s\n' 'Rung one.' >"$FX/lab/rung/1-start.md"
+  printf '%s\n' 'Rung zero-a.' >"$FX/lab/rung/0a-keepawake.md"
+  printf '%s\n' 'OUTSIDE-SECRET' >"$WORK/outside/notes-x.md"
+  lab rung 1
+  expect "rung 1 prints its file" "$OUT" "Rung one."
+  lab rung 0a
+  expect "rung 0a prints its file" "$OUT" "Rung zero-a."
+  bad_id() { # <name> <recipe> <id>
+    lab "$2" "$3"
+    expect "$1 is refused" "$RC" 1
+    expect "$1 says so in one line" "$OUT" "lab: bad rung id"
+    expect_not "$1 reads nothing outside the tree" "$OUT" "OUTSIDE-SECRET"
+  }
+  bad_id "rung ../.. traversal" rung "../../../outside/notes"
+  bad_id "rung 1/.. traversal" rung "1/../../../../outside/notes"
+  bad_id "rung with an empty id" rung ""
+  bad_id "rung with a space" rung "a b"
+  bad_id "report ../.. traversal" report "../../../outside/notes"
+  bad_id "report with an empty id" report ""
 else
   bad "the recipe fixture needs just, justfile and lab.just"
 fi
