@@ -173,7 +173,7 @@ if kill -0 "$hung" 2>/dev/null; then bad "the hung version command is still runn
 
 # A version command that ignores TERM is stopped too.
 fixture c-stubborn
-printf '%s\n' '#!/bin/sh' 'trap "" TERM' 'while :; do sleep 1; done' >"$FX/bin/stubborn"
+printf '%s\n' '#!/bin/sh' 'echo $$ >"$(dirname "$0")/stubborn.pid"' 'trap "" TERM' 'while :; do sleep 1; done' >"$FX/bin/stubborn"
 chmod +x "$FX/bin/stubborn"
 check 01-pass.sh 'echo "RUNG 01 PASS"'
 printf '%s\n' 'version stubborn 1.0.0 stubborn --version' >>"$FX/lab.lock"
@@ -185,6 +185,8 @@ expect_has "a version command that ignores TERM WARNs" "$OUT" "WARN version stub
 expect "a version command that ignores TERM exits 0" "$RC" 0
 if [[ $elapsed -lt 10 ]]; then ok "the run ended within 10s (took ${elapsed}s)"; else bad "the run took ${elapsed}s"; fi
 expect_not "no job notice leaks into the output" "$OUT" "Terminated"
+stub=$(cat "$FX/bin/stubborn.pid")
+if kill -0 "$stub" 2>/dev/null; then bad "the TERM-ignoring command is still running (pid $stub)"; else ok "the TERM-ignoring command was stopped"; fi
 
 fixture h-nolock
 check 01-pass.sh 'echo "RUNG 01 PASS"'
