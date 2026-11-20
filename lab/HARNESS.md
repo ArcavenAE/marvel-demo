@@ -74,7 +74,8 @@ repo comes only from this tree's own `origin` (github.com), and there is no
 flag to name another. Before a post, `lab/verify-report` must accept the body.
 The verdict, version lines and denials block are cleaned first: control
 characters dropped, and your home directory, user name and host name replaced
-by `~`, `<user>` and `<host>`. `lab/verify-report FILE|- [--nonces FILE]` checks
+by `~`, `<user>` and `<host>`. The host name covers `hostname`, `hostname -s`, and where
+`scutil` answers, the LocalHostName with and without `.local`, and the ComputerName. `lab/verify-report FILE|- [--nonces FILE]` checks
 a report's shape (exit 0 valid, 1 invalid, 3 valid with a stale or unknown
 nonce, 2 usage); the nonce list holds issued nonces, oldest first, and only the
 last is fresh. `lab/run versions` prints what each pinned tool says now.

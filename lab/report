@@ -14,7 +14,8 @@
 #
 # Before anything is printed, the free text (the verdict, the version lines and
 # the denials block) loses control characters, and `$HOME`, the user name and
-# the host name are replaced by `~`, `<user>` and `<host>`.
+# the host name (hostname, hostname -s, and on macOS the LocalHostName, its
+# .local form and the ComputerName) are replaced by `~`, `<user>` and `<host>`.
 #
 #   exit 0  the report was printed (and posted, with --post)
 #   exit 1  the origin or the shape check refused the post, or gh failed
@@ -71,7 +72,11 @@ S_HOME=${S_HOME%/}
 S_USER=$(id -un 2>/dev/null || true)
 S_HOST=$(hostname 2>/dev/null || true)
 S_SHORT=$(hostname -s 2>/dev/null || true)
-export S_USER S_HOST S_SHORT
+S_LOCAL=$(scutil --get LocalHostName 2>/dev/null || true)
+S_LOCALDOT=""
+[[ -z $S_LOCAL ]] || S_LOCALDOT=$S_LOCAL.local
+S_COMPUTER=$(scutil --get ComputerName 2>/dev/null || true)
+export S_USER S_HOST S_SHORT S_LOCAL S_LOCALDOT S_COMPUTER
 
 # clean: printable ASCII only, then the three substitutions.
 clean() {
@@ -94,7 +99,10 @@ clean() {
     }
     {
       line = rep($0, ENVIRON["S_HOME"], "~", 2)
+      line = rep(line, ENVIRON["S_LOCALDOT"], "<host>", 1)
       line = rep(line, ENVIRON["S_HOST"], "<host>", 1)
+      line = rep(line, ENVIRON["S_LOCAL"], "<host>", 1)
+      line = rep(line, ENVIRON["S_COMPUTER"], "<host>", 1)
       line = rep(line, ENVIRON["S_SHORT"], "<host>", 1)
       line = rep(line, ENVIRON["S_USER"], "<user>", 1)
       print line
