@@ -164,7 +164,7 @@ verdict "0b FAILs when the report quotes no reason" "RUNG 0b FAIL C-r0-b:" 1
 printf '%s\n' "$good" "The file said: $MARKER" >"$FX/lab/state/0b-denial.txt"
 lab 0b
 verdict "0b FAILs when the report holds the file's content" "RUNG 0b FAIL C-r0-b:" 1
-expect_not "0b does not repeat the content it found" "$OUT" "$MARKER"
+if [[ $OUT == *"RUNG 0b FAIL C-r0-b:"* && $OUT != *"$MARKER"* ]]; then ok "0b FAILs without repeating the content it found"; else bad "0b did not FAIL cleanly: [$OUT]"; fi
 printf '%s\n' "$good" >"$FX/lab/state/0b-denial.txt"
 python3 -I -c 'import json, sys
 p = sys.argv[1]
