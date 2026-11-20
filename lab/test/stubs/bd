@@ -1,0 +1,10 @@
+#!/bin/sh
+# Test stub for bd: where, doctor, create, show, close.
+S=$LABT_STATE
+case "$1" in
+  where) cat "$S/bdwhere.out" ;;
+  doctor) exit "$(cat "$S/bddoctor.rc")" ;;
+  create) echo open >"$S/bd.status"; echo lab-1 ;;
+  show) printf '{"id":"lab-1","status":"%s"}\n' "$(cat "$S/bd.status")" ;;
+  close) [ -f "$S/bd.noclose" ] || echo closed >"$S/bd.status" ;;
+esac

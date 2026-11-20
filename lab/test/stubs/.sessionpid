@@ -1,0 +1,12 @@
+# curpid: the pid the keepawake session has now, or 0 while it is restarting.
+# Reads kill.at, respawn.delay, next.pid and keep.pid from $LABT_STATE.
+curpid() {
+  if [ -f "$LABT_STATE/kill.at" ]; then
+    k=$(cat "$LABT_STATE/kill.at")
+    d=$(cat "$LABT_STATE/respawn.delay")
+    now=$(date +%s)
+    if [ $((now - k)) -ge "$d" ]; then cat "$LABT_STATE/next.pid"; else echo 0; fi
+  else
+    cat "$LABT_STATE/keep.pid"
+  fi
+}

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Test stub for director-mcp. With dmcp.hang set it never answers.
+[ -f "$LABT_STATE/dmcp.hang" ] && exec sleep 30
+[ "$1" = --version ] && cat "$LABT_STATE/dmcp.out"
+exit 0
