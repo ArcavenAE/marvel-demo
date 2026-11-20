@@ -264,7 +264,7 @@ relock
 { grep -v '^release director-mcp' "$FX/lab.lock" || true; } >"$FX/lab.lock.new"
 mv "$FX/lab.lock.new" "$FX/lab.lock"
 lab 0e
-verdict "0e SKIPs when lab.lock pins no director release" "RUNG 0e SKIP no pinned director-mcp release" 0
+verdict "0e SKIPs when lab.lock pins no director release" "RUNG 0e SKIP no pinned director-mcp release in lab.lock" 0
 expect_not "0e with no pinned release is not a pass" "$OUT" "RUNG 0e PASS"
 
 # --- 0f bd --------------------------------------------------------------------
