@@ -21,8 +21,9 @@ name = "lab"
 mkdir -p "$d"
 g="${MARVEL_SESSION##*-g}"; g="${g%%-*}"
 n=0
-if [ -n "${MARVEL_PREDECESSOR:-}" ] && [ -f "$d/$MARVEL_PREDECESSOR.handoff.md" ]; then
-  n=$(sed -n 's/^count=//p' "$d/$MARVEL_PREDECESSOR.handoff.md" | tail -n 1)
+p="${MARVEL_PREDECESSOR##*/}"
+if [ -n "$p" ] && [ -f "$d/$p.handoff.md" ]; then
+  n=$(sed -n 's/^count=//p' "$d/$p.handoff.md" | tail -n 1)
 fi
 while true; do
   n=$((n + 1))

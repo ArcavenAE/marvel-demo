@@ -9,7 +9,9 @@ Each tick it adds one line to `${LAB_STATE:-$HOME/lab-run}/ticker/<session>.log`
 It also rewrites `<session>.handoff.md` in the same directory with its counter and the marker line
 `END HANDOFF`. The manifest's `shift.handoff` path is `~/lab-run/ticker/{session}.handoff.md`, so
 it matches only while `LAB_STATE` is unset. A successor started with `MARVEL_PREDECESSOR` set reads the
-predecessor's handoff file and continues the count.
+predecessor's handoff file and continues the count. marvel sets `MARVEL_PREDECESSOR` to the
+predecessor's session key, `<workspace>/<name>` (here `lab/lab-ticker-g1-0`), and the loop
+keeps only the part after the last `/` to find the file.
 
 Files:
 
@@ -29,18 +31,27 @@ Its handoff file ends:
     count=3
     END HANDOFF
 
-Its successor `lab-ticker-g2-0`, started with `MARVEL_PREDECESSOR=lab-ticker-g1-0`, continues the count in its own log:
+Its successor `lab-ticker-g2-0`, started with `MARVEL_PREDECESSOR=lab/lab-ticker-g1-0`, continues the count in its own log:
 
     lab-ticker-g2-0 gen=2 count=4 v=v1
     lab-ticker-g2-0 gen=2 count=5 v=v1
 
 With `manifest-v2.toml` the same lines end `v=v2`.
 
+## What to expect at a shift
+
+The successor reads the count once, when it starts. If the predecessor is still ticking
+after that, it keeps writing its own next numbers, so for a short time both logs can
+show the same count (for example `count=4` in each). The two logs are separate files, so
+nothing is lost, but a number can repeat across them. A check of a shift should read the
+successor's first line (it continues from the predecessor's last count at the moment the
+successor started), not assume the numbers never repeat.
+
 ## How these lines were recorded
 
 The loop in `manifest.toml` was run by itself, not under marvel: `sh -c` with the
 manifest's own script, in an empty environment with `MARVEL_SESSION` (and
-`MARVEL_PREDECESSOR` for the successor) set by hand, a scratch `HOME`, no
+`MARVEL_PREDECESSOR` for the successor, in the key form `lab/lab-ticker-g1-0`) set by hand, a scratch `HOME`, no
 `MARVEL_SOCKET` and no daemon. `TICKER_MAX` and `TICKER_INTERVAL=0` stop the loop
 after a fixed count with no wait; the manifest sets neither, so a real seat ticks every 5 seconds without end.
 
