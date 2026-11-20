@@ -1,0 +1,441 @@
+#!/usr/bin/env python3
+"""check-settings: keep the lab's project settings inside the lab's rules.
+
+Run it isolated:  python3 -I lab/check-settings [--project DIR]
+                  python3 -I lab/check-settings --user-snapshot FILE
+                  python3 -I lab/check-settings --user-verify FILE
+
+Default mode reads DIR/.claude/settings.json (DIR defaults to the directory
+above lab/) and prints one line per check, then a count:
+
+  C-set-1  no key of the auto-mode family in any file under DIR, counted both
+           as raw text and as a parsed key at any depth (so a key spelled
+           with a JSON escape counts too)
+  C-set-2  the settings file has only `permissions` at the top level and only
+           `allow` and `deny` inside it (any other key FAILs); every allow
+           names one of the three granted tools, Bash, Read or Edit, in exact
+           case (any other tool FAILs); every Bash allow is one of the granted
+           lines (marvel get, doctor, capture, events; bd show, ready; just
+           lab rung, check, report) and nothing else; no bare tool or
+           wildcard allow; and no
+           settings.local.json or .mcp.json anywhere in the tree (either
+           would override or extend the shipped file)
+  C-set-3  every required deny is present
+  C-set-4  every Read, Edit or Write allow starts with ./lab/ and has no
+           parent segment; no Bash allow names a path outside the project;
+           the settings run no commands at all (no hooks, statusLine or
+           helper key, at any depth), since F1's settings carry none
+
+A value of the wrong type (an allow that is not a list, a command that is not
+a string) is a FAIL, never a skip. So is a file or directory that cannot be
+read, and unreadable user settings.
+
+--user-snapshot writes the sha256 of $HOME/.claude/settings.json (or the word
+absent) to FILE. --user-verify compares the same hash with FILE and prints
+C-set-5. Run them around an install, with HOME pointing at a scratch directory
+when testing. This script reads that one file to hash it, never prints its
+text, and writes nothing under HOME.
+
+Exit codes: 0 every check passed, 1 a check failed or an input is unusable,
+2 usage.
+"""
+import hashlib
+import json
+import os
+import sys
+
+USAGE = ("usage: check-settings [--project DIR | --user-snapshot FILE | "
+         "--user-verify FILE]")
+
+# Built from parts so this file does not contain the word it scans for.
+NEEDLE = ("auto" + "Mode").encode()
+
+REQUIRED_DENY = [
+    "Read(~/.ssh/**)",
+    "Read(~/.marvel/keys/**)",
+    "Read(~/.marvel/ssh_host_ed25519_key)",
+    "Read(~/.claude/.credentials*)",
+    "Read(~/.config/gh/**)",
+    "Bash(security find-generic-password:*)",
+    "Bash(gh auth token:*)",
+    "Bash(marvel keys authorize:*)",
+    "Bash(marvel config add-cluster:*)",
+    "Bash(./lab/deny-probe:*)",
+    # Director's call: the agent may not edit the files the gates trust. The
+    # lock file pins the digests of the check scripts, so an agent that could
+    # edit it could re-pin a changed check.
+    "Edit(./lab/check-settings)",
+    "Edit(./lab/test/**)",
+    "Edit(./lab/run)",
+    "Edit(./lab.lock)",
+    "Edit(./lab/HARNESS.md)",
+    # The report recipe runs lab/report, and Edit(./lab/**) is allowed, so
+    # without this deny the agent could rewrite the file and run it. The
+    # sentinel is denied for Read as well as for running, since Read(./lab/**)
+    # would otherwise allow reading it.
+    "Edit(./lab/report)",
+    "Read(./lab/deny-probe)",
+]
+
+# The Bash lines the lab grants, and nothing else. A Bash allow passes only if
+# its words start with one of these prefixes, spelled exactly (case, quoting
+# and path included). Everything else FAILs: a list of bad first words can
+# never be finished, a list of the granted ones can.
+BASH_GRANTS = [
+    ("marvel", "get"), ("marvel", "doctor"), ("marvel", "capture"), ("marvel", "events"),
+    ("bd", "show"), ("bd", "ready"),
+    ("just", "lab", "rung"), ("just", "lab", "check"), ("just", "lab", "report"),
+]
+# The only tool names an allow may use, in exact case. Anything else FAILs,
+# whatever its spec: a tool the lab does not grant stays ungranted.
+GRANTED_TOOLS = {"Bash", "Read", "Edit"}
+# Characters that make a prefix more than words: command separators, pipes,
+# redirects, substitutions, quoting, escapes and globs.
+SHELL_META = set(";&|<>$`\\\"'(){}*?!~#\n\r\t")
+# The only keys the settings file may carry: `permissions` at the top level,
+# and `allow` and `deny` inside it. Anything else FAILs, so a key the check
+# does not know about (a plugin, a marketplace, an extra directory, a mode)
+# cannot pass by being unknown.
+ALLOWED_TOP_KEYS = {"permissions"}
+ALLOWED_PERMISSION_KEYS = {"allow", "deny"}
+# Settings whose value is a command line run by the harness.
+HELPER_KEYS = {"apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
+               "otelHeadersHelper"}
+# Any of these keys, at any depth, means the settings run a command. F1's
+# settings carry none, so any of them FAILs.
+COMMAND_KEYS = {"hooks", "statusLine", "command"} | HELPER_KEYS
+PATH_TOOLS = {"Read", "Edit", "Write", "NotebookEdit"}
+# Files that override or extend the shipped settings, compared by case
+# folding, not lower casing: an APFS volume folds U+017F (LONG S) onto s, and
+# casefold() does too where lower() does not.
+OVERRIDE_NAMES = {"settings.local.json", ".mcp.json"}
+# A Read, Edit or Write spec is scoped to the lab tree.
+LAB_PREFIX = "./lab/"
+
+
+def split_rule(rule):
+    """'Bash(a b:*)' -> ('Bash', 'a b:*'); 'Read' -> ('Read', None)."""
+    rule = rule.strip()
+    if rule.endswith(")") and "(" in rule:
+        tool, _, rest = rule.partition("(")
+        return tool, rest[:-1]
+    return rule, None
+
+
+def strip_wildcard_suffix(spec):
+    for suffix in (":*", " *", "/**"):
+        if spec.endswith(suffix):
+            return spec[: -len(suffix)]
+    return spec
+
+
+def outside_tree(token):
+    """A path-looking token that leaves the project directory."""
+    if token.startswith(("/", "~", "$", "`")):
+        return True
+    return ".." in token.replace("\\", "/").split("/")
+
+
+def path_spec_inside(spec):
+    """A Read/Edit/Write spec must start with ./lab/ and have no .. segment.
+    The whole spec is judged, wildcard included, so ./** and ./lab (which are
+    not under ./lab/) FAIL."""
+    if not spec.startswith(LAB_PREFIX) or "~" in spec or "\\" in spec:
+        return False
+    return ".." not in spec.split("/")
+
+
+def load_settings(proj):
+    path = os.path.join(proj, ".claude", "settings.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh), None
+    except OSError as exc:
+        return None, "cannot read %s: %s" % (path, exc.strerror or exc)
+    except ValueError as exc:
+        return None, "%s is not valid JSON: %s" % (path, exc)
+
+
+def count_keys(node):
+    """Keys equal to the needle, at any depth of a parsed JSON value."""
+    n = 0
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == NEEDLE.decode():
+                n += 1
+            n += count_keys(v)
+    elif isinstance(node, list):
+        for v in node:
+            n += count_keys(v)
+    return n
+
+
+def parsed_key_hits(data):
+    """Parse a file that looks like JSON and count the needle as a key. The raw
+    byte count misses a key spelled with a JSON escape; the parsed key does not."""
+    head = data.lstrip()[:1]
+    if head not in (b"{", b"["):
+        return 0
+    try:
+        return count_keys(json.loads(data.decode("utf-8")))
+    except (ValueError, RecursionError):
+        return 0
+
+
+def check_1(proj):
+    """Count the needle in every file. A file or directory that cannot be read
+    is a FAIL: a check that skips what it cannot read passes by not looking."""
+    files = hits = 0
+    unreadable = []
+
+    def on_error(exc):
+        unreadable.append(getattr(exc, "filename", None) or "?")
+
+    for dp, dn, fn in os.walk(proj, onerror=on_error):
+        dn[:] = sorted(d for d in dn if d != ".git")
+        for f in sorted(fn):
+            try:
+                with open(os.path.join(dp, f), "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                unreadable.append(os.path.join(dp, f))
+                continue
+            files += 1
+            hits += max(data.count(NEEDLE), parsed_key_hits(data))
+    if unreadable:
+        return False, "%d unreadable path(s), first %s" % (
+            len(unreadable), os.path.relpath(unreadable[0], proj) if unreadable[0] != "?" else "?")
+    if hits:
+        return False, "%d match(es) in %d file(s)" % (hits, files)
+    return True, "no match in %d file(s)" % files
+
+
+def get_perm(doc):
+    """(permissions object, problem). Absent is an empty object; any other
+    type is a problem, never a skip."""
+    if "permissions" not in doc:
+        return {}, None
+    perm = doc["permissions"]
+    if not isinstance(perm, dict):
+        return None, "permissions is not an object"
+    return perm, None
+
+
+def get_rules(perm, key):
+    """(list of rule strings, problem) for permissions.<key>."""
+    if key not in perm:
+        return [], None
+    value = perm[key]
+    if not isinstance(value, list):
+        return None, "permissions.%s is not a list" % key
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            return None, "permissions.%s[%d] is not a string" % (key, i)
+    return value, None
+
+
+def bash_problem(spec):
+    """Why a Bash allow spec is too broad, or None."""
+    core = strip_wildcard_suffix(spec)
+    if not core.strip():
+        return "empty command"
+    meta = sorted(set(core) & SHELL_META)
+    if meta:
+        return "shell character %r in the command" % "".join(meta)
+    words = core.split(" ")
+    if "" in words:
+        return "irregular spacing"
+    for grant in BASH_GRANTS:
+        if tuple(words[:len(grant)]) == grant:
+            return None
+    return "not one of the granted lines (%s)" % ", ".join(" ".join(g) for g in BASH_GRANTS)
+
+
+def override_problems(proj):
+    """Files that change what the settings grant without being the shipped
+    file: a project .claude/settings.local.json is applied over the shared
+    file, and .mcp.json adds MCP servers. Either one anywhere in the tree is a
+    FAIL whatever it holds, so existence alone decides. Names are compared
+    without regard to case (a case-insensitive filesystem resolves them to the
+    same file), and a directory that cannot be read is a FAIL because it could
+    hide one."""
+    bad = []
+
+    def on_error(exc):
+        bad.append("cannot read %s, so it could hide a settings or MCP file"
+                   % (getattr(exc, "filename", None) or "a directory"))
+
+    for dp, dn, fn in os.walk(proj, onerror=on_error):
+        dn[:] = sorted(d for d in dn if d != ".git")
+        for name in sorted(dn + fn):
+            if name.casefold() in OVERRIDE_NAMES:
+                bad.append("%s must not exist (it overrides or extends the shipped settings)"
+                           % os.path.relpath(os.path.join(dp, name), proj))
+    return bad
+
+
+def check_2(doc, proj):
+    bad = override_problems(proj)
+    perm, err = get_perm(doc)
+    if err:
+        return False, "; ".join([err] + bad)
+    allows, err = get_rules(perm, "allow")
+    if err:
+        return False, "; ".join([err] + bad)
+    for key in sorted(k for k in doc if k not in ALLOWED_TOP_KEYS):
+        bad.append("top-level key %s is not allowed" % key)
+    for key in sorted(k for k in perm if k not in ALLOWED_PERMISSION_KEYS):
+        bad.append("permissions.%s is not allowed" % key)
+    denies, _ = get_rules(perm, "deny")
+    denies = set(denies or []) | set(REQUIRED_DENY)
+    for rule in allows:
+        tool, spec = split_rule(rule)
+        if tool not in GRANTED_TOOLS:
+            bad.append("allow %r (tool is not one of %s)" % (rule, ", ".join(sorted(GRANTED_TOOLS))))
+        elif spec is None:
+            bad.append("bare allow %s" % rule)
+        elif rule.strip() in denies:
+            bad.append("allow equals a deny: %s" % rule)
+        elif tool == "Bash":
+            why = bash_problem(spec)
+            if why:
+                bad.append("allow %s (%s)" % (rule, why))
+        elif "*" in strip_wildcard_suffix(spec):
+            bad.append("allow %s" % rule)
+    if bad:
+        return False, "; ".join(bad)
+    return True, "only granted tools and lines, only the permissions keys allow and deny"
+
+
+def check_3(doc):
+    perm, err = get_perm(doc)
+    if err:
+        return False, err
+    have, err = get_rules(perm, "deny")
+    if err:
+        return False, err
+    have = set(x.strip() for x in have)
+    missing = [d for d in REQUIRED_DENY if d not in have]
+    if missing:
+        return False, "missing deny: " + ", ".join(missing)
+    return True, "all %d denies present" % len(REQUIRED_DENY)
+
+
+def command_keys(node, where):
+    """Where the settings run a command: a key in COMMAND_KEYS at any depth.
+    F1's settings carry none, so every hit is a FAIL."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            here = "%s.%s" % (where, k)
+            if k in COMMAND_KEYS:
+                yield here
+            yield from command_keys(v, here)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from command_keys(v, "%s[%d]" % (where, i))
+
+
+def check_4(doc):
+    bad = []
+    perm, err = get_perm(doc)
+    if err:
+        return False, err
+    allows, err = get_rules(perm, "allow")
+    if err:
+        return False, err
+    for rule in allows:
+        tool, spec = split_rule(rule)
+        if spec is None:
+            continue
+        if tool in PATH_TOOLS:
+            if not path_spec_inside(spec):
+                bad.append("allow %s" % rule)
+        elif tool == "Bash":
+            if any(outside_tree(t) for t in strip_wildcard_suffix(spec).split()):
+                bad.append("allow %s" % rule)
+    for where in command_keys(doc, "settings"):
+        bad.append("%s: the settings run no commands, none are allowed" % where)
+    if bad:
+        return False, "; ".join(bad)
+    return True, "every allow path stays under ./lab/, and the settings run no commands (none are allowed)"
+
+
+def user_hash():
+    path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except FileNotFoundError:
+        return "absent"
+    except OSError as exc:
+        return "unreadable:%s" % (exc.strerror or "error")
+
+
+def report(cid, ok, msg):
+    print("%s %s %s" % (cid, "PASS" if ok else "FAIL", msg))
+    return ok
+
+
+def main(argv):
+    proj = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    mode = "project"
+    arg = None
+    args = argv[1:]
+    if len(args) == 2 and args[0] == "--project":
+        proj = os.path.abspath(args[1])
+    elif len(args) == 2 and args[0] in ("--user-snapshot", "--user-verify"):
+        mode, arg = args[0], args[1]
+    elif args:
+        print(USAGE)
+        return 2
+
+    if mode == "--user-snapshot":
+        now = user_hash()
+        if now.startswith("unreadable"):
+            print("check-settings: user settings unreadable (%s), no snapshot written" % now)
+            return 1
+        try:
+            with open(arg, "w", encoding="utf-8") as fh:
+                fh.write(now + "\n")
+        except OSError as exc:
+            print("check-settings: cannot write %s: %s" % (arg, exc.strerror or exc))
+            return 1
+        print("check-settings: user settings hash recorded")
+        return 0
+
+    if mode == "--user-verify":
+        try:
+            with open(arg, encoding="utf-8") as fh:
+                before = fh.read().strip()
+        except OSError as exc:
+            report("C-set-5", False, "cannot read the snapshot %s: %s" % (arg, exc.strerror or exc))
+            return 1
+        now = user_hash()
+        if before.startswith("unreadable") or now.startswith("unreadable"):
+            report("C-set-5", False, "user settings unreadable: before %s, now %s" % (before or "empty", now))
+            return 1
+        if before and before == now:
+            report("C-set-5", True, "user settings unchanged (%s)" % ("absent" if now == "absent" else "same hash"))
+            return 0
+        report("C-set-5", False, "user settings changed: before %s, now %s" % (before or "empty", now))
+        return 1
+
+    doc, err = load_settings(proj)
+    if err:
+        print("settings FAIL " + err)
+        return 1
+    if not isinstance(doc, dict):
+        print("settings FAIL the settings file is not a JSON object")
+        return 1
+    ok = [
+        report("C-set-1", *check_1(proj)),
+        report("C-set-2", *check_2(doc, proj)),
+        report("C-set-3", *check_3(doc)),
+        report("C-set-4", *check_4(doc)),
+    ]
+    print("check-settings: %d passed, %d failed" % (sum(ok), len(ok) - sum(ok)))
+    return 0 if all(ok) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
