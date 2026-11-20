@@ -8,17 +8,21 @@ Run it isolated:  python3 -I lab/check-settings [--project DIR]
 Default mode reads DIR/.claude/settings.json (DIR defaults to the directory
 above lab/) and prints one line per check, then a count:
 
-  C-set-1  no key of the auto-mode family in any file under DIR
-  C-set-2  every allow names one of the three granted tools, Bash, Read or
-           Edit, in exact case (any other tool FAILs); every Bash allow is one
-           of the granted lines (marvel get, doctor,
-           capture, events; bd show, ready; just lab rung, check, report) and
-           nothing else; no bare tool, MCP tool or wildcard allow, no bypass
-           mode, no env block, no MCP servers
+  C-set-1  no key of the auto-mode family in any file under DIR, counted both
+           as raw text and as a parsed key at any depth (so a key spelled
+           with a JSON escape counts too)
+  C-set-2  the settings file has only `permissions` at the top level and only
+           `allow` and `deny` inside it (any other key FAILs); every allow
+           names one of the three granted tools, Bash, Read or Edit, in exact
+           case (any other tool FAILs); every Bash allow is one of the granted
+           lines (marvel get, doctor, capture, events; bd show, ready; just
+           lab rung, check, report) and nothing else; no bare tool or
+           wildcard allow
   C-set-3  every required deny is present
-  C-set-4  no path outside the project directory in an allow rule or in any
-           command the settings run (hooks, statusLine, apiKeyHelper and the
-           other helper keys)
+  C-set-4  every Read, Edit or Write allow starts with ./lab/ and has no
+           parent segment; no Bash allow names a path outside the project;
+           the settings run no commands at all (no hooks, statusLine or
+           helper key, at any depth), since F1's settings carry none
 
 A value of the wrong type (an allow that is not a list, a command that is not
 a string) is a FAIL, never a skip. So is a file or directory that cannot be
@@ -80,13 +84,21 @@ GRANTED_TOOLS = {"Bash", "Read", "Edit"}
 # Characters that make a prefix more than words: command separators, pipes,
 # redirects, substitutions, quoting, escapes and globs.
 SHELL_META = set(";&|<>$`\\\"'(){}*?!~#\n\r\t")
+# The only keys the settings file may carry: `permissions` at the top level,
+# and `allow` and `deny` inside it. Anything else FAILs, so a key the check
+# does not know about (a plugin, a marketplace, an extra directory, a mode)
+# cannot pass by being unknown.
+ALLOWED_TOP_KEYS = {"permissions"}
+ALLOWED_PERMISSION_KEYS = {"allow", "deny"}
 # Settings whose value is a command line run by the harness.
 HELPER_KEYS = {"apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
                "otelHeadersHelper"}
+# Any of these keys, at any depth, means the settings run a command. F1's
+# settings carry none, so any of them FAILs.
+COMMAND_KEYS = {"hooks", "statusLine", "command"} | HELPER_KEYS
 PATH_TOOLS = {"Read", "Edit", "Write", "NotebookEdit"}
-FORBIDDEN_KEYS = ["env", "mcpServers", "enableAllProjectMcpServers",
-                  "enabledMcpjsonServers"]
-FORBIDDEN_MODES = {"bypassPermissions", "dontAsk"}
+# A Read, Edit or Write spec is scoped to the lab tree.
+LAB_PREFIX = "./lab/"
 
 
 def split_rule(rule):
@@ -113,8 +125,12 @@ def outside_tree(token):
 
 
 def path_spec_inside(spec):
-    """A Read/Edit/Write spec must be a ./ path with no .. segment."""
-    return spec.startswith("./") and not outside_tree(spec[2:]) and "~" not in spec
+    """A Read/Edit/Write spec must start with ./lab/ and have no .. segment.
+    The whole spec is judged, wildcard included, so ./** and ./lab (which are
+    not under ./lab/) FAIL."""
+    if not spec.startswith(LAB_PREFIX) or "~" in spec or "\\" in spec:
+        return False
+    return ".." not in spec.split("/")
 
 
 def load_settings(proj):
@@ -126,6 +142,32 @@ def load_settings(proj):
         return None, "cannot read %s: %s" % (path, exc.strerror or exc)
     except ValueError as exc:
         return None, "%s is not valid JSON: %s" % (path, exc)
+
+
+def count_keys(node):
+    """Keys equal to the needle, at any depth of a parsed JSON value."""
+    n = 0
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == NEEDLE.decode():
+                n += 1
+            n += count_keys(v)
+    elif isinstance(node, list):
+        for v in node:
+            n += count_keys(v)
+    return n
+
+
+def parsed_key_hits(data):
+    """Parse a file that looks like JSON and count the needle as a key. The raw
+    byte count misses a key spelled with a JSON escape; the parsed key does not."""
+    head = data.lstrip()[:1]
+    if head not in (b"{", b"["):
+        return 0
+    try:
+        return count_keys(json.loads(data.decode("utf-8")))
+    except (ValueError, RecursionError):
+        return 0
 
 
 def check_1(proj):
@@ -147,7 +189,7 @@ def check_1(proj):
                 unreadable.append(os.path.join(dp, f))
                 continue
             files += 1
-            hits += data.count(NEEDLE)
+            hits += max(data.count(NEEDLE), parsed_key_hits(data))
     if unreadable:
         return False, "%d unreadable path(s), first %s" % (
             len(unreadable), os.path.relpath(unreadable[0], proj) if unreadable[0] != "?" else "?")
@@ -205,11 +247,10 @@ def check_2(doc):
     allows, err = get_rules(perm, "allow")
     if err:
         return False, err
-    if perm.get("defaultMode") in FORBIDDEN_MODES:
-        bad.append("defaultMode %s" % perm["defaultMode"])
-    for key in FORBIDDEN_KEYS:
-        if key in doc:
-            bad.append("key %s" % key)
+    for key in sorted(k for k in doc if k not in ALLOWED_TOP_KEYS):
+        bad.append("top-level key %s is not allowed" % key)
+    for key in sorted(k for k in perm if k not in ALLOWED_PERMISSION_KEYS):
+        bad.append("permissions.%s is not allowed" % key)
     denies, _ = get_rules(perm, "deny")
     denies = set(denies or []) | set(REQUIRED_DENY)
     for rule in allows:
@@ -228,7 +269,7 @@ def check_2(doc):
             bad.append("allow %s" % rule)
     if bad:
         return False, "; ".join(bad)
-    return True, "no forbidden allow, mode or key"
+    return True, "only granted tools and lines, only the permissions keys allow and deny"
 
 
 def check_3(doc):
@@ -245,22 +286,18 @@ def check_3(doc):
     return True, "all %d denies present" % len(REQUIRED_DENY)
 
 
-def command_values(node, where, problems):
-    """Every command line the settings run: any `command` key at any depth
-    (hooks, statusLine and the rest) and the helper keys in HELPER_KEYS. A
-    value of the wrong type is a problem, never a skip."""
+def command_keys(node, where):
+    """Where the settings run a command: a key in COMMAND_KEYS at any depth.
+    F1's settings carry none, so every hit is a FAIL."""
     if isinstance(node, dict):
         for k, v in node.items():
-            if k == "command" or k in HELPER_KEYS:
-                if isinstance(v, str):
-                    yield "%s.%s" % (where, k), v
-                else:
-                    problems.append("%s.%s is not a string" % (where, k))
-            else:
-                yield from command_values(v, "%s.%s" % (where, k), problems)
+            here = "%s.%s" % (where, k)
+            if k in COMMAND_KEYS:
+                yield here
+            yield from command_keys(v, here)
     elif isinstance(node, list):
         for i, v in enumerate(node):
-            yield from command_values(v, "%s[%d]" % (where, i), problems)
+            yield from command_keys(v, "%s[%d]" % (where, i))
 
 
 def check_4(doc):
@@ -281,16 +318,11 @@ def check_4(doc):
         elif tool == "Bash":
             if any(outside_tree(t) for t in strip_wildcard_suffix(spec).split()):
                 bad.append("allow %s" % rule)
-    if "hooks" in doc and not isinstance(doc["hooks"], dict):
-        bad.append("hooks is not an object")
-    problems = []
-    for where, cmd in command_values(doc, "settings", problems):
-        if any(outside_tree(t) for t in cmd.split()):
-            bad.append("%s runs %s" % (where, cmd))
-    bad.extend(problems)
+    for where in command_keys(doc, "settings"):
+        bad.append("%s: the settings run no commands, none are allowed" % where)
     if bad:
         return False, "; ".join(bad)
-    return True, "every allow path and command stays in the project"
+    return True, "every allow path stays under ./lab/, and the settings run no commands (none are allowed)"
 
 
 def user_hash():
