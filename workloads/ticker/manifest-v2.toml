@@ -1,0 +1,43 @@
+# Lab workload ticker, manifest v2: the same loop, tagged v2.
+# One seat that writes "<session> gen=<generation> count=<n>" every 5 seconds to
+# ${LAB_STATE:-$HOME/lab-run}/ticker/<session>.log, and keeps its counter in a handoff
+# file so a successor continues the count. See README.md.
+
+[workspace]
+name = "lab"
+
+[[team]]
+name = "ticker"
+
+  [[team.role]]
+  name = "ticker"
+  replicas = 1
+  restart_policy = "always"
+
+    [team.role.runtime]
+    image = "shell"
+    command = "sh"
+    args = ["-c", '''d="${TICKER_DIR:-${LAB_STATE:-$HOME/lab-run}/ticker}"
+mkdir -p "$d"
+g="${MARVEL_SESSION##*-g}"; g="${g%%-*}"
+n=0
+p="${MARVEL_PREDECESSOR##*/}"
+if [ -n "$p" ] && [ -f "$d/$p.handoff.md" ]; then
+  n=$(sed -n 's/^count=//p' "$d/$p.handoff.md" | tail -n 1)
+fi
+while true; do
+  n=$((n + 1))
+  echo "$MARVEL_SESSION gen=$g count=$n v=${TICKER_VERSION:-v1}" >> "$d/$MARVEL_SESSION.log"
+  printf 'count=%s\nEND HANDOFF\n' "$n" > "$d/$MARVEL_SESSION.handoff.md"
+  if [ -n "${TICKER_MAX:-}" ] && [ "$n" -ge "$TICKER_MAX" ]; then break; fi
+  sleep "${TICKER_INTERVAL:-5}"
+done
+''']
+
+    [team.role.runtime.env]
+    TICKER_VERSION = "v2"
+
+    [team.role.shift]
+    handoff = "~/lab-run/ticker/{session}.handoff.md"
+    handoff_marker = "END HANDOFF"
+    handoff_window = "5m"
