@@ -43,6 +43,8 @@ the check is not trusted:
 `lab.lock` can list `version <name> <expected> <command words...>`. If the
 command's first output line lacks `<expected>`, or the tool is missing, the
 harness prints `WARN version <name>: ...` and carries on. Drift never fails a run.
+A command that does not answer within `LAB_VERSION_TIMEOUT` seconds (default 5)
+is stopped by its pid and WARNs `no answer in <n>s`; it never hangs or fails the run.
 
 ## Tests
 
