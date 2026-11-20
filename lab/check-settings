@@ -12,7 +12,13 @@ above lab/) and prints one line per check, then a count:
   C-set-2  no allow rule on the forbidden list, no bypass mode, no env block,
            no MCP servers
   C-set-3  every required deny is present
-  C-set-4  no path outside the project directory in an allow rule or a hook
+  C-set-4  no path outside the project directory in an allow rule or in any
+           command the settings run (hooks, statusLine, apiKeyHelper and the
+           other helper keys)
+
+A value of the wrong type (an allow that is not a list, a command that is not
+a string) is a FAIL, never a skip. So is a file or directory that cannot be
+read, and unreadable user settings.
 
 --user-snapshot writes the sha256 of $HOME/.claude/settings.json (or the word
 absent) to FILE. --user-verify compares the same hash with FILE and prints
@@ -45,15 +51,27 @@ REQUIRED_DENY = [
     "Bash(marvel keys authorize:*)",
     "Bash(marvel config add-cluster:*)",
     "Bash(./lab/deny-probe:*)",
+    # Director's call: the agent may not edit the files the gates trust. The
+    # lock file pins the digests of the check scripts, so an agent that could
+    # edit it could re-pin a changed check.
+    "Edit(./lab/check-settings)",
+    "Edit(./lab/test/**)",
+    "Edit(./lab/run)",
+    "Edit(./lab.lock)",
+    "Edit(./lab/HARNESS.md)",
 ]
 
-# One-word Bash prefixes an allow must never grant: the tools the lab keeps
-# narrow, and shells and interpreters that run arbitrary code.
-BROAD_BASH = {
-    "", "*", "marvel", "gh", "tmux", "bash", "sh", "zsh", "env", "sudo", "ssh",
-    "curl", "wget", "python", "python3", "perl", "ruby", "node", "npx", "eval",
-    "exec", "xargs",
+# Tools the lab keeps narrow: an allow that names only the tool grants it all.
+NARROW_ONLY = {"marvel", "gh", "tmux"}
+# Shells and interpreters: an allow whose first word is one of these grants
+# arbitrary code, whatever follows it (bash -c, python3 -c, env A=1 ...).
+INTERPRETERS = {
+    "bash", "sh", "zsh", "env", "sudo", "ssh", "curl", "wget", "python", "perl",
+    "ruby", "node", "npx", "eval", "exec", "xargs",
 }
+# Settings whose value is a command line run by the harness.
+HELPER_KEYS = {"apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
+               "otelHeadersHelper"}
 PATH_TOOLS = {"Read", "Edit", "Write", "NotebookEdit"}
 FORBIDDEN_KEYS = ["env", "mcpServers", "enableAllProjectMcpServers",
                   "enabledMcpjsonServers"]
@@ -100,44 +118,102 @@ def load_settings(proj):
 
 
 def check_1(proj):
+    """Count the needle in every file. A file or directory that cannot be read
+    is a FAIL: a check that skips what it cannot read passes by not looking."""
     files = hits = 0
-    for dp, dn, fn in os.walk(proj):
+    unreadable = []
+
+    def on_error(exc):
+        unreadable.append(getattr(exc, "filename", None) or "?")
+
+    for dp, dn, fn in os.walk(proj, onerror=on_error):
         dn[:] = sorted(d for d in dn if d != ".git")
         for f in sorted(fn):
             try:
                 with open(os.path.join(dp, f), "rb") as fh:
                     data = fh.read()
             except OSError:
+                unreadable.append(os.path.join(dp, f))
                 continue
             files += 1
             hits += data.count(NEEDLE)
+    if unreadable:
+        return False, "%d unreadable path(s), first %s" % (
+            len(unreadable), os.path.relpath(unreadable[0], proj) if unreadable[0] != "?" else "?")
     if hits:
         return False, "%d match(es) in %d file(s)" % (hits, files)
     return True, "no match in %d file(s)" % files
 
 
+def get_perm(doc):
+    """(permissions object, problem). Absent is an empty object; any other
+    type is a problem, never a skip."""
+    if "permissions" not in doc:
+        return {}, None
+    perm = doc["permissions"]
+    if not isinstance(perm, dict):
+        return None, "permissions is not an object"
+    return perm, None
+
+
+def get_rules(perm, key):
+    """(list of rule strings, problem) for permissions.<key>."""
+    if key not in perm:
+        return [], None
+    value = perm[key]
+    if not isinstance(value, list):
+        return None, "permissions.%s is not a list" % key
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            return None, "permissions.%s[%d] is not a string" % (key, i)
+    return value, None
+
+
+def bash_problem(spec):
+    """Why a Bash allow spec is too broad, or None."""
+    core = strip_wildcard_suffix(spec).strip()
+    if "*" in core or not core:
+        return "wildcard or empty command"
+    words = core.split()
+    while words and "=" in words[0] and not words[0].startswith(("=", "-")):
+        words = words[1:]
+    if not words:
+        return "no command"
+    first = os.path.basename(words[0]).rstrip("0123456789.")
+    if first in INTERPRETERS:
+        return "first word %s runs arbitrary code" % words[0]
+    if len(words) == 1 and first in NARROW_ONLY:
+        return "%s with no verb" % words[0]
+    return None
+
+
 def check_2(doc):
     bad = []
-    perm = doc.get("permissions", {}) if isinstance(doc.get("permissions"), dict) else {}
+    perm, err = get_perm(doc)
+    if err:
+        return False, err
+    allows, err = get_rules(perm, "allow")
+    if err:
+        return False, err
     if perm.get("defaultMode") in FORBIDDEN_MODES:
         bad.append("defaultMode %s" % perm["defaultMode"])
     for key in FORBIDDEN_KEYS:
         if key in doc:
             bad.append("key %s" % key)
-    allows = perm.get("allow", [])
-    denies = set(perm.get("deny", [])) | set(REQUIRED_DENY)
-    for rule in allows if isinstance(allows, list) else []:
-        tool, spec = split_rule(str(rule))
+    denies, _ = get_rules(perm, "deny")
+    denies = set(denies or []) | set(REQUIRED_DENY)
+    for rule in allows:
+        tool, spec = split_rule(rule)
         if tool.startswith("mcp__"):
             bad.append("allow %s" % rule)
         elif spec is None:
             bad.append("bare allow %s" % rule)
-        elif str(rule).strip() in denies:
+        elif rule.strip() in denies:
             bad.append("allow equals a deny: %s" % rule)
         elif tool == "Bash":
-            core = strip_wildcard_suffix(spec).strip()
-            if "*" in core or core in BROAD_BASH:
-                bad.append("allow %s" % rule)
+            why = bash_problem(spec)
+            if why:
+                bad.append("allow %s (%s)" % (rule, why))
         elif tool in PATH_TOOLS:
             if "*" in strip_wildcard_suffix(spec):
                 bad.append("allow %s" % rule)
@@ -147,33 +223,47 @@ def check_2(doc):
 
 
 def check_3(doc):
-    perm = doc.get("permissions", {}) if isinstance(doc.get("permissions"), dict) else {}
-    have = perm.get("deny", [])
-    have = set(str(x).strip() for x in have) if isinstance(have, list) else set()
+    perm, err = get_perm(doc)
+    if err:
+        return False, err
+    have, err = get_rules(perm, "deny")
+    if err:
+        return False, err
+    have = set(x.strip() for x in have)
     missing = [d for d in REQUIRED_DENY if d not in have]
     if missing:
         return False, "missing deny: " + ", ".join(missing)
     return True, "all %d denies present" % len(REQUIRED_DENY)
 
 
-def hook_commands(node):
+def command_values(node, where, problems):
+    """Every command line the settings run: any `command` key at any depth
+    (hooks, statusLine and the rest) and the helper keys in HELPER_KEYS. A
+    value of the wrong type is a problem, never a skip."""
     if isinstance(node, dict):
         for k, v in node.items():
-            if k == "command" and isinstance(v, str):
-                yield v
+            if k == "command" or k in HELPER_KEYS:
+                if isinstance(v, str):
+                    yield "%s.%s" % (where, k), v
+                else:
+                    problems.append("%s.%s is not a string" % (where, k))
             else:
-                yield from hook_commands(v)
+                yield from command_values(v, "%s.%s" % (where, k), problems)
     elif isinstance(node, list):
-        for v in node:
-            yield from hook_commands(v)
+        for i, v in enumerate(node):
+            yield from command_values(v, "%s[%d]" % (where, i), problems)
 
 
 def check_4(doc):
     bad = []
-    perm = doc.get("permissions", {}) if isinstance(doc.get("permissions"), dict) else {}
-    allows = perm.get("allow", [])
-    for rule in allows if isinstance(allows, list) else []:
-        tool, spec = split_rule(str(rule))
+    perm, err = get_perm(doc)
+    if err:
+        return False, err
+    allows, err = get_rules(perm, "allow")
+    if err:
+        return False, err
+    for rule in allows:
+        tool, spec = split_rule(rule)
         if spec is None:
             continue
         if tool in PATH_TOOLS:
@@ -182,12 +272,16 @@ def check_4(doc):
         elif tool == "Bash":
             if any(outside_tree(t) for t in strip_wildcard_suffix(spec).split()):
                 bad.append("allow %s" % rule)
-    for cmd in hook_commands(doc.get("hooks", {})):
+    if "hooks" in doc and not isinstance(doc["hooks"], dict):
+        bad.append("hooks is not an object")
+    problems = []
+    for where, cmd in command_values(doc, "settings", problems):
         if any(outside_tree(t) for t in cmd.split()):
-            bad.append("hook %s" % cmd)
+            bad.append("%s runs %s" % (where, cmd))
+    bad.extend(problems)
     if bad:
         return False, "; ".join(bad)
-    return True, "every allow path and hook command stays in the project"
+    return True, "every allow path and command stays in the project"
 
 
 def user_hash():
@@ -220,9 +314,13 @@ def main(argv):
         return 2
 
     if mode == "--user-snapshot":
+        now = user_hash()
+        if now.startswith("unreadable"):
+            print("check-settings: user settings unreadable (%s), no snapshot written" % now)
+            return 1
         try:
             with open(arg, "w", encoding="utf-8") as fh:
-                fh.write(user_hash() + "\n")
+                fh.write(now + "\n")
         except OSError as exc:
             print("check-settings: cannot write %s: %s" % (arg, exc.strerror or exc))
             return 1
@@ -237,6 +335,9 @@ def main(argv):
             report("C-set-5", False, "cannot read the snapshot %s: %s" % (arg, exc.strerror or exc))
             return 1
         now = user_hash()
+        if before.startswith("unreadable") or now.startswith("unreadable"):
+            report("C-set-5", False, "user settings unreadable: before %s, now %s" % (before or "empty", now))
+            return 1
         if before and before == now:
             report("C-set-5", True, "user settings unchanged (%s)" % ("absent" if now == "absent" else "same hash"))
             return 0
@@ -244,7 +345,7 @@ def main(argv):
         return 1
 
     doc, err = load_settings(proj)
-    if doc is None:
+    if err:
         print("settings FAIL " + err)
         return 1
     if not isinstance(doc, dict):

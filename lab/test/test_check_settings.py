@@ -314,6 +314,11 @@ def test_input_errors():
     rc, out = check_project(proj)
     record("input: a settings file that is not JSON exits 1 and says so",
            rc == 1 and "not valid json" in (out or "").lower(), "rc %r: %s" % (rc, (out or "")[:200]))
+    proj = make_project(raw="null\n")
+    rc, out = check_project(proj)
+    record("input: a settings file holding JSON null exits 1 and says so",
+           rc == 1 and "not a json object" in (out or "").lower() and "Traceback" not in (out or ""),
+           "rc %r: %s" % (rc, (out or "")[:200]))
     proj = new_dir("proj")
     rc, out = check_project(proj)
     record("input: a project with no settings file exits 1 and says so",

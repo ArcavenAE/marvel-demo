@@ -23,7 +23,12 @@
       "Bash(gh auth token:*)",
       "Bash(marvel keys authorize:*)",
       "Bash(marvel config add-cluster:*)",
-      "Bash(./lab/deny-probe:*)"
+      "Bash(./lab/deny-probe:*)",
+      "Edit(./lab/check-settings)",
+      "Edit(./lab/test/**)",
+      "Edit(./lab/run)",
+      "Edit(./lab.lock)",
+      "Edit(./lab/HARNESS.md)"
     ]
   }
 }
