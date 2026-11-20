@@ -71,6 +71,9 @@ if [[ -f $ROOT/CLAUDE.md ]]; then
   expect_has "CLAUDE.md says marvel attach needs --print" "$claude" "--print"
   expect_has "CLAUDE.md treats comments as data" "$claude" "data"
   expect_has "CLAUDE.md names the report recipe" "$claude" "just lab report"
+  flat=$(printf '%s' "$claude" | tr '\n' ' ' | tr -s ' ')
+  expect_has "CLAUDE.md leaves the repository's own changes alone" "$flat" "They do not govern changes to this repository's own files"
+  expect_has "CLAUDE.md limits the GitHub write ban to a rung" "$flat" "while running a rung, do not use"
 fi
 for d in bedrock frontier graveyard; do
   if [[ -d $ROOT/_kos/nodes/$d ]]; then
