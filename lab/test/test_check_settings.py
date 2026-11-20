@@ -47,6 +47,11 @@ REQUIRED_DENY = [
     "Edit(./lab/run)",
     "Edit(./lab.lock)",
     "Edit(./lab/HARNESS.md)",
+    # Round 8: the report recipe runs lab/report, so the agent must not be able
+    # to rewrite it under Edit(./lab/**); and the sentinel must not be readable
+    # under Read(./lab/**), which is the denial rung 0b probes for.
+    "Edit(./lab/report)",
+    "Read(./lab/deny-probe)",
 ]
 
 EXPECTED_ALLOW = [
@@ -774,6 +779,37 @@ def test_fold_override_names():
            "casefold or lower behaves differently in this Python")
 
 
+def test_round8_denies():
+    """Edit(./lab/**) is allowed and `just lab report` runs lab/report, so
+    lab/report must be denied for Edit; the sentinel must be denied for Read.
+    Both are required denies (the removal mutants run in test_cset3), and
+    neither may also appear as an allow."""
+    shipped = (load_settings() or {}).get("permissions", {})
+    for rule in ("Edit(./lab/report)", "Read(./lab/deny-probe)"):
+        record("round 8: the shipped deny list holds %s" % rule, rule in shipped.get("deny", []),
+               "deny is %r" % shipped.get("deny"))
+        expect_fail("round 8: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
+                    mutate=lambda d, r=rule: allow(d).append(r))
+    record("round 8: the shipped deny list has 17 entries", len(shipped.get("deny", [])) == 17,
+           "count %r" % len(shipped.get("deny", [])))
+    # Removing only one of the two leaves C-set-3 FAIL naming the other.
+    for rule in ("Edit(./lab/report)", "Read(./lab/deny-probe)"):
+        proj = make_project(mutate=lambda d, r=rule: d["permissions"].update(
+            {"deny": [x for x in d["permissions"]["deny"] if x != r]}))
+        rc, out = check_project(proj)
+        line = [l for l in (out or "").splitlines() if l.startswith("C-set-3")]
+        record("round 8: without %s the C-set-3 line FAILs and names it" % rule,
+               rc == 1 and bool(line) and "FAIL" in line[0] and rule in line[0], "line %r" % line)
+    # Related controls: allows next to the denied files stay fine.
+    expect_pass("round 8: control, Edit(./lab/reports.md) as an allow passes C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Edit(./lab/reports.md)"))
+    expect_pass("round 8: control, Read(./lab/deny-probe.md) as an allow passes C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Read(./lab/deny-probe.md)"))
+    expect_pass("round 8: control, Read(./lab/report) as an allow passes C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Read(./lab/report)"))
+    expect_pass("round 8: control, the shipped settings pass C-set-3", "C-set-3")
+
+
 def test_failopen_types():
     """A value of the wrong type must fail, never be skipped."""
     expect_fail_all("fail-open 2: allow as a string fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
@@ -900,7 +936,7 @@ def main():
                test_input_errors, test_cset5, test_no_writes_to_home,
                test_failopen_first_word, test_allowlist, test_tool_allowlist, test_key_allowlist, test_no_commands,
                test_lab_scope, test_parsed_keys, test_override_files, test_fold_override_names,
-               test_failopen_types, test_failopen_commands,
+               test_round8_denies, test_failopen_types, test_failopen_commands,
                test_failopen_unreadable, test_failopen_user_settings):
         fn()
     passed = sum(1 for _, ok, _ in results if ok)
