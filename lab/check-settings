@@ -17,7 +17,9 @@ above lab/) and prints one line per check, then a count:
            case (any other tool FAILs); every Bash allow is one of the granted
            lines (marvel get, doctor, capture, events; bd show, ready; just
            lab rung, check, report) and nothing else; no bare tool or
-           wildcard allow
+           wildcard allow; and no
+           settings.local.json or .mcp.json anywhere in the tree (either
+           would override or extend the shipped file)
   C-set-3  every required deny is present
   C-set-4  every Read, Edit or Write allow starts with ./lab/ and has no
            parent segment; no Bash allow names a path outside the project;
@@ -97,6 +99,9 @@ HELPER_KEYS = {"apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
 # settings carry none, so any of them FAILs.
 COMMAND_KEYS = {"hooks", "statusLine", "command"} | HELPER_KEYS
 PATH_TOOLS = {"Read", "Edit", "Write", "NotebookEdit"}
+# Files that override or extend the shipped settings; lower case, compared
+# without regard to case.
+OVERRIDE_NAMES = {"settings.local.json", ".mcp.json"}
 # A Read, Edit or Write spec is scoped to the lab tree.
 LAB_PREFIX = "./lab/"
 
@@ -239,14 +244,37 @@ def bash_problem(spec):
     return "not one of the granted lines (%s)" % ", ".join(" ".join(g) for g in BASH_GRANTS)
 
 
-def check_2(doc):
+def override_problems(proj):
+    """Files that change what the settings grant without being the shipped
+    file: a project .claude/settings.local.json is applied over the shared
+    file, and .mcp.json adds MCP servers. Either one anywhere in the tree is a
+    FAIL whatever it holds, so existence alone decides. Names are compared
+    without regard to case (a case-insensitive filesystem resolves them to the
+    same file), and a directory that cannot be read is a FAIL because it could
+    hide one."""
     bad = []
+
+    def on_error(exc):
+        bad.append("cannot read %s, so it could hide a settings or MCP file"
+                   % (getattr(exc, "filename", None) or "a directory"))
+
+    for dp, dn, fn in os.walk(proj, onerror=on_error):
+        dn[:] = sorted(d for d in dn if d != ".git")
+        for name in sorted(dn + fn):
+            if name.lower() in OVERRIDE_NAMES:
+                bad.append("%s must not exist (it overrides or extends the shipped settings)"
+                           % os.path.relpath(os.path.join(dp, name), proj))
+    return bad
+
+
+def check_2(doc, proj):
+    bad = override_problems(proj)
     perm, err = get_perm(doc)
     if err:
-        return False, err
+        return False, "; ".join([err] + bad)
     allows, err = get_rules(perm, "allow")
     if err:
-        return False, err
+        return False, "; ".join([err] + bad)
     for key in sorted(k for k in doc if k not in ALLOWED_TOP_KEYS):
         bad.append("top-level key %s is not allowed" % key)
     for key in sorted(k for k in perm if k not in ALLOWED_PERMISSION_KEYS):
@@ -394,7 +422,7 @@ def main(argv):
         return 1
     ok = [
         report("C-set-1", *check_1(proj)),
-        report("C-set-2", *check_2(doc)),
+        report("C-set-2", *check_2(doc, proj)),
         report("C-set-3", *check_3(doc)),
         report("C-set-4", *check_4(doc)),
     ]
