@@ -99,8 +99,9 @@ HELPER_KEYS = {"apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
 # settings carry none, so any of them FAILs.
 COMMAND_KEYS = {"hooks", "statusLine", "command"} | HELPER_KEYS
 PATH_TOOLS = {"Read", "Edit", "Write", "NotebookEdit"}
-# Files that override or extend the shipped settings; lower case, compared
-# without regard to case.
+# Files that override or extend the shipped settings, compared by case
+# folding, not lower casing: an APFS volume folds U+017F (LONG S) onto s, and
+# casefold() does too where lower() does not.
 OVERRIDE_NAMES = {"settings.local.json", ".mcp.json"}
 # A Read, Edit or Write spec is scoped to the lab tree.
 LAB_PREFIX = "./lab/"
@@ -261,7 +262,7 @@ def override_problems(proj):
     for dp, dn, fn in os.walk(proj, onerror=on_error):
         dn[:] = sorted(d for d in dn if d != ".git")
         for name in sorted(dn + fn):
-            if name.lower() in OVERRIDE_NAMES:
+            if name.casefold() in OVERRIDE_NAMES:
                 bad.append("%s must not exist (it overrides or extends the shipped settings)"
                            % os.path.relpath(os.path.join(dp, name), proj))
     return bad
