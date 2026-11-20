@@ -1,6 +1,6 @@
 """Tests for lab/check-settings and the lab's .claude/settings.json.
 
-Run with:  env -i HOME=<scratch> TMPDIR=<scratch> PATH=$PATH python3 -I lab/tests/test_check_settings.py
+Run with:  env -i HOME=<scratch> TMPDIR=<scratch> PATH=$PATH python3 -I lab/test/test_check_settings.py
 
 Every check runs against a scratch copy of the kit settings and a scratch
 HOME that this file creates itself. Nothing here reads or writes the caller's
