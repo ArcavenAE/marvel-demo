@@ -1,0 +1,24 @@
+# The lab orc's repositories. Each one is a git bundle shipped in this kit and
+# cloned from a local path. Nothing here has a remote, and nothing is fetched.
+
+repos:
+  ticker:
+    path: ticker
+    type: workload
+    description: A shell loop that writes its session name, generation and a counter to a file
+    bundle: bundles/ticker.bundle
+    default_branch: main
+
+  cron-note:
+    path: cron-note
+    type: workload
+    description: A scheduled role that appends a timestamp every two minutes
+    bundle: bundles/cron-note.bundle
+    default_branch: main
+
+  relay:
+    path: relay
+    type: workload
+    description: Two seats that exchange a message over the local bus
+    bundle: bundles/relay.bundle
+    default_branch: main
