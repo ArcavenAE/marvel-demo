@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(marvel get:*)",
+      "Bash(marvel doctor:*)",
+      "Bash(marvel capture:*)",
+      "Bash(marvel events:*)",
+      "Bash(bd show:*)",
+      "Bash(bd ready:*)",
+      "Bash(just lab rung:*)",
+      "Bash(just lab check:*)",
+      "Bash(just lab report:*)",
+      "Read(./lab/**)",
+      "Edit(./lab/**)"
+    ],
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.marvel/keys/**)",
+      "Read(~/.marvel/ssh_host_ed25519_key)",
+      "Read(~/.claude/.credentials*)",
+      "Read(~/.config/gh/**)",
+      "Bash(security find-generic-password:*)",
+      "Bash(gh auth token:*)",
+      "Bash(marvel keys authorize:*)",
+      "Bash(marvel config add-cluster:*)",
+      "Bash(./lab/deny-probe:*)"
+    ]
+  }
+}

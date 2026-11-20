@@ -1,1 +1,264 @@
-"""Placeholder so the tests have something to run; replaced in the next commit."""
+#!/usr/bin/env python3
+"""check-settings: keep the lab's project settings inside the lab's rules.
+
+Run it isolated:  python3 -I lab/check-settings [--project DIR]
+                  python3 -I lab/check-settings --user-snapshot FILE
+                  python3 -I lab/check-settings --user-verify FILE
+
+Default mode reads DIR/.claude/settings.json (DIR defaults to the directory
+above lab/) and prints one line per check, then a count:
+
+  C-set-1  no key of the auto-mode family in any file under DIR
+  C-set-2  no allow rule on the forbidden list, no bypass mode, no env block,
+           no MCP servers
+  C-set-3  every required deny is present
+  C-set-4  no path outside the project directory in an allow rule or a hook
+
+--user-snapshot writes the sha256 of $HOME/.claude/settings.json (or the word
+absent) to FILE. --user-verify compares the same hash with FILE and prints
+C-set-5. Run them around an install, with HOME pointing at a scratch directory
+when testing. This script reads that one file to hash it, never prints its
+text, and writes nothing under HOME.
+
+Exit codes: 0 every check passed, 1 a check failed or an input is unusable,
+2 usage.
+"""
+import hashlib
+import json
+import os
+import sys
+
+USAGE = ("usage: check-settings [--project DIR | --user-snapshot FILE | "
+         "--user-verify FILE]")
+
+# Built from parts so this file does not contain the word it scans for.
+NEEDLE = ("auto" + "Mode").encode()
+
+REQUIRED_DENY = [
+    "Read(~/.ssh/**)",
+    "Read(~/.marvel/keys/**)",
+    "Read(~/.marvel/ssh_host_ed25519_key)",
+    "Read(~/.claude/.credentials*)",
+    "Read(~/.config/gh/**)",
+    "Bash(security find-generic-password:*)",
+    "Bash(gh auth token:*)",
+    "Bash(marvel keys authorize:*)",
+    "Bash(marvel config add-cluster:*)",
+    "Bash(./lab/deny-probe:*)",
+]
+
+# One-word Bash prefixes an allow must never grant: the tools the lab keeps
+# narrow, and shells and interpreters that run arbitrary code.
+BROAD_BASH = {
+    "", "*", "marvel", "gh", "tmux", "bash", "sh", "zsh", "env", "sudo", "ssh",
+    "curl", "wget", "python", "python3", "perl", "ruby", "node", "npx", "eval",
+    "exec", "xargs",
+}
+PATH_TOOLS = {"Read", "Edit", "Write", "NotebookEdit"}
+FORBIDDEN_KEYS = ["env", "mcpServers", "enableAllProjectMcpServers",
+                  "enabledMcpjsonServers"]
+FORBIDDEN_MODES = {"bypassPermissions", "dontAsk"}
+
+
+def split_rule(rule):
+    """'Bash(a b:*)' -> ('Bash', 'a b:*'); 'Read' -> ('Read', None)."""
+    rule = rule.strip()
+    if rule.endswith(")") and "(" in rule:
+        tool, _, rest = rule.partition("(")
+        return tool, rest[:-1]
+    return rule, None
+
+
+def strip_wildcard_suffix(spec):
+    for suffix in (":*", " *", "/**"):
+        if spec.endswith(suffix):
+            return spec[: -len(suffix)]
+    return spec
+
+
+def outside_tree(token):
+    """A path-looking token that leaves the project directory."""
+    if token.startswith(("/", "~", "$", "`")):
+        return True
+    return ".." in token.replace("\\", "/").split("/")
+
+
+def path_spec_inside(spec):
+    """A Read/Edit/Write spec must be a ./ path with no .. segment."""
+    return spec.startswith("./") and not outside_tree(spec[2:]) and "~" not in spec
+
+
+def load_settings(proj):
+    path = os.path.join(proj, ".claude", "settings.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh), None
+    except OSError as exc:
+        return None, "cannot read %s: %s" % (path, exc.strerror or exc)
+    except ValueError as exc:
+        return None, "%s is not valid JSON: %s" % (path, exc)
+
+
+def check_1(proj):
+    files = hits = 0
+    for dp, dn, fn in os.walk(proj):
+        dn[:] = sorted(d for d in dn if d != ".git")
+        for f in sorted(fn):
+            try:
+                with open(os.path.join(dp, f), "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                continue
+            files += 1
+            hits += data.count(NEEDLE)
+    if hits:
+        return False, "%d match(es) in %d file(s)" % (hits, files)
+    return True, "no match in %d file(s)" % files
+
+
+def check_2(doc):
+    bad = []
+    perm = doc.get("permissions", {}) if isinstance(doc.get("permissions"), dict) else {}
+    if perm.get("defaultMode") in FORBIDDEN_MODES:
+        bad.append("defaultMode %s" % perm["defaultMode"])
+    for key in FORBIDDEN_KEYS:
+        if key in doc:
+            bad.append("key %s" % key)
+    allows = perm.get("allow", [])
+    denies = set(perm.get("deny", [])) | set(REQUIRED_DENY)
+    for rule in allows if isinstance(allows, list) else []:
+        tool, spec = split_rule(str(rule))
+        if tool.startswith("mcp__"):
+            bad.append("allow %s" % rule)
+        elif spec is None:
+            bad.append("bare allow %s" % rule)
+        elif str(rule).strip() in denies:
+            bad.append("allow equals a deny: %s" % rule)
+        elif tool == "Bash":
+            core = strip_wildcard_suffix(spec).strip()
+            if "*" in core or core in BROAD_BASH:
+                bad.append("allow %s" % rule)
+        elif tool in PATH_TOOLS:
+            if "*" in strip_wildcard_suffix(spec):
+                bad.append("allow %s" % rule)
+    if bad:
+        return False, "; ".join(bad)
+    return True, "no forbidden allow, mode or key"
+
+
+def check_3(doc):
+    perm = doc.get("permissions", {}) if isinstance(doc.get("permissions"), dict) else {}
+    have = perm.get("deny", [])
+    have = set(str(x).strip() for x in have) if isinstance(have, list) else set()
+    missing = [d for d in REQUIRED_DENY if d not in have]
+    if missing:
+        return False, "missing deny: " + ", ".join(missing)
+    return True, "all %d denies present" % len(REQUIRED_DENY)
+
+
+def hook_commands(node):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "command" and isinstance(v, str):
+                yield v
+            else:
+                yield from hook_commands(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from hook_commands(v)
+
+
+def check_4(doc):
+    bad = []
+    perm = doc.get("permissions", {}) if isinstance(doc.get("permissions"), dict) else {}
+    allows = perm.get("allow", [])
+    for rule in allows if isinstance(allows, list) else []:
+        tool, spec = split_rule(str(rule))
+        if spec is None:
+            continue
+        if tool in PATH_TOOLS:
+            if not path_spec_inside(spec):
+                bad.append("allow %s" % rule)
+        elif tool == "Bash":
+            if any(outside_tree(t) for t in strip_wildcard_suffix(spec).split()):
+                bad.append("allow %s" % rule)
+    for cmd in hook_commands(doc.get("hooks", {})):
+        if any(outside_tree(t) for t in cmd.split()):
+            bad.append("hook %s" % cmd)
+    if bad:
+        return False, "; ".join(bad)
+    return True, "every allow path and hook command stays in the project"
+
+
+def user_hash():
+    path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except FileNotFoundError:
+        return "absent"
+    except OSError as exc:
+        return "unreadable:%s" % (exc.strerror or "error")
+
+
+def report(cid, ok, msg):
+    print("%s %s %s" % (cid, "PASS" if ok else "FAIL", msg))
+    return ok
+
+
+def main(argv):
+    proj = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    mode = "project"
+    arg = None
+    args = argv[1:]
+    if len(args) == 2 and args[0] == "--project":
+        proj = os.path.abspath(args[1])
+    elif len(args) == 2 and args[0] in ("--user-snapshot", "--user-verify"):
+        mode, arg = args[0], args[1]
+    elif args:
+        print(USAGE)
+        return 2
+
+    if mode == "--user-snapshot":
+        try:
+            with open(arg, "w", encoding="utf-8") as fh:
+                fh.write(user_hash() + "\n")
+        except OSError as exc:
+            print("check-settings: cannot write %s: %s" % (arg, exc.strerror or exc))
+            return 1
+        print("check-settings: user settings hash recorded")
+        return 0
+
+    if mode == "--user-verify":
+        try:
+            with open(arg, encoding="utf-8") as fh:
+                before = fh.read().strip()
+        except OSError as exc:
+            report("C-set-5", False, "cannot read the snapshot %s: %s" % (arg, exc.strerror or exc))
+            return 1
+        now = user_hash()
+        if before and before == now:
+            report("C-set-5", True, "user settings unchanged (%s)" % ("absent" if now == "absent" else "same hash"))
+            return 0
+        report("C-set-5", False, "user settings changed: before %s, now %s" % (before or "empty", now))
+        return 1
+
+    doc, err = load_settings(proj)
+    if doc is None:
+        print("settings FAIL " + err)
+        return 1
+    if not isinstance(doc, dict):
+        print("settings FAIL the settings file is not a JSON object")
+        return 1
+    ok = [
+        report("C-set-1", *check_1(proj)),
+        report("C-set-2", *check_2(doc)),
+        report("C-set-3", *check_3(doc)),
+        report("C-set-4", *check_4(doc)),
+    ]
+    print("check-settings: %d passed, %d failed" % (sum(ok), len(ok) - sum(ok)))
+    return 0 if all(ok) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
