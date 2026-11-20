@@ -727,6 +727,53 @@ def test_override_files():
            not found and os.path.exists(SETTINGS), "found %r" % found)
 
 
+def test_fold_override_names():
+    """Round 6: an APFS volume folds U+017F (LONG S) onto s, so a file named
+    with it opens as settings.local.json or .mcp.json. The match uses
+    casefold, which folds it, not lower, which does not. Measured on this
+    volume: of every character whose case, canonical or compatibility form
+    reaches a letter of the two names, only U+017F resolves to the file."""
+    long_s = "\u017f"
+    names = ("settings.local.json", ".mcp.json")
+    # Every s position of both names, at the project root and in .claude/.
+    for name in names:
+        for i, ch in enumerate(name):
+            if ch != "s":
+                continue
+            variant = name[:i] + long_s + name[i + 1:]
+            for place in ("", ".claude/", "lab/sub/"):
+                expect_fail("fold: U+017F at position %d of %s%s fails C-set-2" % (i, place, name), "C-set-2",
+                            extra_files={place + variant: "{}\n"})
+    # Mixed spellings: long s together with upper case and with a plain case variant.
+    for rel in ("\u017fETTINGS.LOCAL.JSON", "\u017fettings.local.JSON", ".claude/\u017fETTINGS.local.json",
+                ".MCP.J\u017fON", ".mcp.j\u017fon", ".claude/.mcp.j\u017fon"):
+        expect_fail("fold: the mixed spelling %r fails C-set-2" % rel, "C-set-2",
+                    extra_files={rel: "{}\n"})
+    # A link and a directory with the folded name fail the same way.
+    def link(proj):
+        os.symlink("../lab/x", os.path.join(proj, ".claude", "\u017fettings.local.json"))
+
+    def folder(proj):
+        os.makedirs(os.path.join(proj, "lab", ".mcp.j\u017fon"))
+
+    expect_fail_all("fold: a link named with U+017F fails C-set-2", ["C-set-2"], setup=link)
+    expect_fail_all("fold: a directory named with U+017F fails C-set-2", ["C-set-2"], setup=folder)
+    # Controls. U+212A KELVIN SIGN lowers to k, but neither name has a k, so
+    # it cannot reach them; a name that merely carries it is a different file.
+    # Full-width and other compatibility forms do not resolve on the measured
+    # volume, so they pass: the check does not widen past the folds that do.
+    for rel in ("settings.local.json\u212a", "\u212aettings.local.json", "settings.local.js\u212an",
+                "\uff53ettings.local.json", ".mcp.j\uff53on", "settings.local.j\u00dfon",
+                "settings.local.\u0131json", "\u0131settings.local.json", "settings.local.json\u017f",
+                "\u017fsettings.local.json", ".mcp.json\u017f", "x.\u017fmcp.json"):
+        expect_pass("fold: control, %r passes C-set-2" % rel, "C-set-2", extra_files={rel: "{}\n"})
+    # The property behind the choice, so a change of function shows here.
+    record("fold: casefold maps U+017F onto s and lower does not (the reason for the choice)",
+           ("\u017fettings.local.json".casefold() == "settings.local.json"
+            and "\u017fettings.local.json".lower() != "settings.local.json"),
+           "casefold or lower behaves differently in this Python")
+
+
 def test_failopen_types():
     """A value of the wrong type must fail, never be skipped."""
     expect_fail_all("fail-open 2: allow as a string fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
@@ -852,7 +899,8 @@ def main():
     for fn in (test_baseline, test_cset1, test_cset2, test_cset3, test_cset4,
                test_input_errors, test_cset5, test_no_writes_to_home,
                test_failopen_first_word, test_allowlist, test_tool_allowlist, test_key_allowlist, test_no_commands,
-               test_lab_scope, test_parsed_keys, test_override_files, test_failopen_types, test_failopen_commands,
+               test_lab_scope, test_parsed_keys, test_override_files, test_fold_override_names,
+               test_failopen_types, test_failopen_commands,
                test_failopen_unreadable, test_failopen_user_settings):
         fn()
     passed = sum(1 for _, ok, _ in results if ok)
