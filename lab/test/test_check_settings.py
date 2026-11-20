@@ -151,8 +151,8 @@ def expect_fail_all(name, cids, mutate=None, raw=None, extra_files=None, setup=N
            "want rc 1 and FAIL for %s, got rc %r and %r; output: %s" % (cids, rc, sts, (out or "")[:300]))
 
 
-def expect_pass(name, cid, mutate=None):
-    proj = make_project(mutate=mutate)
+def expect_pass(name, cid, mutate=None, extra_files=None):
+    proj = make_project(mutate=mutate, extra_files=extra_files)
     rc, out = check_project(proj)
     record(name, line_status(out, cid) == "PASS",
            "want %s PASS, got %r: %s" % (cid, line_status(out, cid), (out or "")[:300]))
@@ -298,11 +298,10 @@ def test_cset4():
     ]
     for label, fn in cases:
         expect_fail("C-set-4: %s fails" % label, "C-set-4", mutate=fn)
-    proj = make_project(mutate=lambda d: d.update(
-        {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "./lab/hook-ok"}]}]}}))
-    rc, out = check_project(proj)
-    record("C-set-4: a hook command inside the tree passes C-set-4",
-           line_status(out, "C-set-4") == "PASS", "got %r: %s" % (line_status(out, "C-set-4"), (out or "")[:200]))
+    # F1's settings carry no hooks at all, so even an in-tree hook command fails.
+    expect_fail("C-set-4: a hook command inside the tree fails C-set-4 (no commands are allowed)", "C-set-4",
+                mutate=lambda d: d.update(
+                    {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "./lab/hook-ok"}]}]}}))
     proj = make_project()
     rc, out = check_project(proj)
     record("C-set-4: the unmutated settings pass", line_status(out, "C-set-4") == "PASS",
@@ -539,6 +538,129 @@ def test_tool_allowlist():
                     {"allow": [r for r in d["permissions"]["allow"] if r != "Read(./lab/**)"]}))
 
 
+def test_key_allowlist():
+    """M1: only `permissions` at the top level, only `allow` and `deny` inside it."""
+    top = [
+        ("enabledPlugins", {"enabledPlugins": {"x@y": True}}),
+        ("extraKnownMarketplaces", {"extraKnownMarketplaces": {"m": {"source": {"source": "github", "repo": "o/r"}}}}),
+        ("model", {"model": "x"}),
+        ("outputStyle", {"outputStyle": "x"}),
+        ("a schema key", {"$schema": "https://example.invalid/s.json"}),
+        ("cleanupPeriodDays", {"cleanupPeriodDays": 1}),
+        ("includeCoAuthoredBy", {"includeCoAuthoredBy": False}),
+        ("an empty unknown key", {"x": {}}),
+        ("a null unknown key", {"x": None}),
+    ]
+    for label, extra in top:
+        expect_fail("key allowlist: top-level %s fails C-set-2" % label, "C-set-2",
+                    mutate=lambda d, e=extra: d.update(e))
+    inner = [
+        ("additionalDirectories", {"additionalDirectories": ["~"]}),
+        ("defaultMode acceptEdits", {"defaultMode": "acceptEdits"}),
+        ("defaultMode plan", {"defaultMode": "plan"}),
+        ("defaultMode auto", {"defaultMode": "auto"}),
+        ("an ask list", {"ask": ["Bash(marvel get:*)"]}),
+        ("disableBypassPermissionsMode", {"disableBypassPermissionsMode": "disable"}),
+        ("an unknown key", {"x": 1}),
+    ]
+    for label, extra in inner:
+        expect_fail("key allowlist: permissions.%s fails C-set-2" % label, "C-set-2",
+                    mutate=lambda d, e=extra: d.setdefault("permissions", {}).update(e))
+    # Hooks of the types that carry no `command` key.
+    for label, hook in (("an http hook", {"type": "http", "url": "https://example.invalid/h"}),
+                        ("an mcp_tool hook", {"type": "mcp_tool", "server": "s", "tool": "t"}),
+                        ("a prompt hook", {"type": "prompt", "prompt": "x"})):
+        expect_fail_all("key allowlist: %s fails C-set-2 and C-set-4" % label, ["C-set-2", "C-set-4"],
+                        mutate=lambda d, h=hook: d.update({"hooks": {"PreToolUse": [{"hooks": [h]}]}}))
+    # Controls: a file that holds only the two allowed blocks passes C-set-2,
+    # whether or not it carries every field.
+    expect_pass("key allowlist: control, the shipped keys pass C-set-2", "C-set-2")
+    expect_pass("key allowlist: control, permissions with only allow passes C-set-2", "C-set-2",
+                mutate=lambda d: d["permissions"].pop("deny"))
+    expect_pass("key allowlist: control, permissions with only deny passes C-set-2", "C-set-2",
+                mutate=lambda d: d["permissions"].pop("allow"))
+    base = load_settings()
+    ok = base is not None and sorted(base) == ["permissions"] and sorted(base["permissions"]) == ["allow", "deny"]
+    record("key allowlist: the shipped file has exactly permissions{allow, deny}", ok,
+           "keys %r" % (sorted(base) if base else None))
+
+
+def test_no_commands():
+    """M2: F1's settings carry no hooks, statusLine or helper command, so any
+    of them FAILs C-set-4 and the output line says none are allowed."""
+    cmds = [
+        ("a hook running curl", {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "curl https://example.invalid/x"}]}]}}),
+        ("a hook running python3 -c", {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "python3 -c \"import os\""}]}]}}),
+        ("a hook chaining a command", {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "./lab/h; curl x"}]}]}}),
+        ("a hook inside the tree", {"hooks": {"PostToolUse": [{"hooks": [{"type": "command", "command": "./lab/h"}]}]}}),
+        ("an empty hooks object", {"hooks": {}}),
+        ("a statusLine inside the tree", {"statusLine": {"type": "command", "command": "./lab/s"}}),
+        ("a statusLine running curl", {"statusLine": {"type": "command", "command": "curl x"}}),
+        ("an apiKeyHelper inside the tree", {"apiKeyHelper": "./lab/k"}),
+        ("an awsAuthRefresh inside the tree", {"awsAuthRefresh": "./lab/a"}),
+        ("an awsCredentialExport inside the tree", {"awsCredentialExport": "./lab/a"}),
+        ("an otelHeadersHelper inside the tree", {"otelHeadersHelper": "./lab/o"}),
+        ("a nested command key", {"x": {"y": [{"command": "./lab/z"}]}}),
+    ]
+    for label, extra in cmds:
+        expect_fail("no commands: %s fails C-set-4" % label, "C-set-4", mutate=lambda d, e=extra: d.update(e))
+    proj = make_project()
+    rc, out = check_project(proj)
+    line = [l for l in (out or "").splitlines() if l.startswith("C-set-4")]
+    record("no commands: the C-set-4 line says that no commands are allowed",
+           bool(line) and "PASS" in line[0] and "none are allowed" in line[0], "line %r" % line)
+    proj = make_project(mutate=lambda d: d.update({"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "./lab/h"}]}]}}))
+    rc, out = check_project(proj)
+    line = [l for l in (out or "").splitlines() if l.startswith("C-set-4")]
+    record("no commands: a FAIL line says that none are allowed",
+           bool(line) and "FAIL" in line[0] and "none are allowed" in line[0], "line %r" % line)
+
+
+def test_lab_scope():
+    """M3: a Read or Edit spec must start with ./lab/ ."""
+    bad = ["./**", "./", ".", "./.claude/**", "./.claude/settings.json", "./lab", "./lab.lock", "./labx/**",
+           "./lab/../x", "./lab/../../x", "./README.md", "./*", "./.git/**", "./**/x", "./lab/..", "lab/**",
+           "**", "*", "", "./.lab/**", ".//lab/**", "./Lab/**", "./LAB/**"]
+    for tool in ("Read", "Edit"):
+        for spec in bad:
+            expect_fail("lab scope: %s(%s) fails C-set-4" % (tool, spec), "C-set-4",
+                        mutate=lambda d, r="%s(%s)" % (tool, spec): allow(d).append(r))
+    for rule in ("Read(./lab/**)", "Edit(./lab/**)", "Read(./lab/notes.md)", "Edit(./lab/notes.md)",
+                 "Read(./lab/sub/dir/**)", "Edit(./lab/a b.md)"):
+        expect_pass("lab scope: control, %s passes C-set-4" % rule, "C-set-4",
+                    mutate=lambda d, r=rule: allow(d).append(r))
+    expect_pass("lab scope: control, the shipped settings pass C-set-4", "C-set-4")
+
+
+def test_parsed_keys():
+    """S1: C-set-1 also looks at parsed keys at any depth, so an escaped key
+    that the raw bytes do not show still FAILs."""
+    esc = "auto" + "\\u004d" + "ode"          # the key spelled with a JSON escape
+    esc2 = "\\u0061uto" + "Mode"              # another escaped spelling
+    raw_settings = '{"permissions": {"allow": [], "deny": []}, "%s": true}\n'
+    expect_fail("parsed keys: an escaped key in the settings file fails C-set-1", "C-set-1",
+                raw=raw_settings % esc)
+    expect_fail("parsed keys: a second escaped spelling fails C-set-1", "C-set-1", raw=raw_settings % esc2)
+    expect_fail("parsed keys: an escaped key nested in a list fails C-set-1", "C-set-1",
+                raw='{"permissions": {"allow": [], "deny": []}, "x": [{"y": {"%s": 1}}]}\n' % esc)
+    expect_fail("parsed keys: an escaped key in another JSON file fails C-set-1", "C-set-1",
+                extra_files={"lab/other.json": '{"a": {"%s": 1}}\n' % esc})
+    expect_fail("parsed keys: an escaped key in a file without a .json name fails C-set-1", "C-set-1",
+                extra_files={"lab/other.txt": '{"%s": 1}\n' % esc})
+    expect_fail("parsed keys: an escaped key in a top-level JSON list fails C-set-1", "C-set-1",
+                extra_files={"lab/list.json": '[{"%s": 1}]\n' % esc})
+    # Controls: benign JSON, an escaped benign key, a similar key and a
+    # non-JSON file all pass.
+    expect_pass("parsed keys: control, another JSON file with benign keys passes C-set-1", "C-set-1",
+                extra_files={"lab/ok.json": '{"a": {"b": [1, 2, {"c": 3}]}}\n'})
+    expect_pass("parsed keys: control, an escaped benign key passes C-set-1", "C-set-1",
+                extra_files={"lab/ok2.json": '{"\\u0061": 1}\n'})
+    expect_pass("parsed keys: control, a similar key passes C-set-1", "C-set-1",
+                extra_files={"lab/ok3.json": '{"auto": 1, "mode": 2, "Automode": 3}\n'})
+    expect_pass("parsed keys: control, text that is not JSON passes C-set-1", "C-set-1",
+                extra_files={"lab/ok.txt": "{not json at all\n"})
+
+
 def test_failopen_types():
     """A value of the wrong type must fail, never be skipped."""
     expect_fail_all("fail-open 2: allow as a string fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
@@ -587,9 +709,9 @@ def test_failopen_commands():
         ("an apiKeyHelper that is not a string", lambda d: d.update({"apiKeyHelper": ["/opt/x/key"]})),
     ):
         expect_fail("fail-open 3: %s fails C-set-4" % label, "C-set-4", mutate=mut)
-    expect_pass("fail-open 3: control, statusLine command inside the tree passes C-set-4", "C-set-4",
+    expect_fail("fail-open 3: a statusLine command inside the tree fails C-set-4 (none are allowed)", "C-set-4",
                 mutate=lambda d: d.update({"statusLine": {"type": "command", "command": "./lab/status"}}))
-    expect_pass("fail-open 3: control, apiKeyHelper inside the tree passes C-set-4", "C-set-4",
+    expect_fail("fail-open 3: an apiKeyHelper inside the tree fails C-set-4 (none are allowed)", "C-set-4",
                 mutate=lambda d: d.update({"apiKeyHelper": "./lab/key"}))
 
 
@@ -663,7 +785,8 @@ def main():
     print("home for this run is a scratch directory under", scratch_root)
     for fn in (test_baseline, test_cset1, test_cset2, test_cset3, test_cset4,
                test_input_errors, test_cset5, test_no_writes_to_home,
-               test_failopen_first_word, test_allowlist, test_tool_allowlist, test_failopen_types, test_failopen_commands,
+               test_failopen_first_word, test_allowlist, test_tool_allowlist, test_key_allowlist, test_no_commands,
+               test_lab_scope, test_parsed_keys, test_failopen_types, test_failopen_commands,
                test_failopen_unreadable, test_failopen_user_settings):
         fn()
     passed = sum(1 for _, ok, _ in results if ok)
