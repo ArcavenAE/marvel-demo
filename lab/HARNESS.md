@@ -20,7 +20,9 @@ prints exactly one line that starts with `RUNG ` and exits to match:
 | `RUNG <id> FAIL <check-id>: <what was seen>` | 1 |
 
 A SKIP is never counted as a pass. Other lines the check prints are passed
-through. Ids sort by their number, then their letter, so `0a` to `0g` run
+through, but a check must print no other line shaped like a verdict, that is
+none that starts with `RUNG `: the harness reads a second one as a second
+verdict and fails the rung with `H-noverdict`. Ids sort by their number, then their letter, so `0a` to `0g` run
 before `01`, and `02` runs before `10`.
 
 ## What the harness refuses
