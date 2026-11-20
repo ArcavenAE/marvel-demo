@@ -422,6 +422,42 @@ rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
 expect_not "host forms: the .local name does not appear" "$OUT" "lab-local-9.local"
 expect_not "host forms: the ComputerName does not appear" "$OUT" "Lab Mac 9"
 expect_has "host forms: the .local name and the bare name both become <host>" "$OUT" "- bonjour <host>, bare <host>, named <host>, and lab-local-9x stays"
+# A ComputerName with spaces and an apostrophe is matched as one exact string,
+# and no fragment of it leaks.
+rfix r5c
+printf '%s\n' '#!/bin/sh' 'case "$*" in "--get ComputerName") echo "Pat'"'"'s Lab Mac" ;; *) exit 1 ;; esac' >"$FX/bin/scutil"
+printf '%s\n' "owned by Pat's Lab Mac, not Pat's Lab Macintosh" >"$FX/denials.txt"
+rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+expect_has "host forms: a ComputerName with spaces and an apostrophe reads <host> as one string" "$OUT" "- owned by <host>, not Pat's Lab Macintosh"
+printf '%s\n' "owned by Pat's Lab Mac" >"$FX/denials.txt"
+rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+expect "host forms: nothing of the ComputerName is left beside <host>" "$(printf '%s\n' "$OUT" | tail -1)" "- owned by <host>"
+for frag in "Pat" "'s" "Lab" "Mac"; do
+  expect_not "host forms: the fragment [$frag] does not leak" "$(printf '%s\n' "$OUT" | tail -1)" "$frag"
+done
+# scutil failing or printing nothing is skipped and does not fail the report.
+for mode in 'exit 1' 'exit 0' 'echo ""' 'echo oops >&2; exit 2'; do
+  rfix r5d
+  printf '%s\n' '#!/bin/sh' "$mode" >"$FX/bin/scutil"
+  printf '%s\n' 'nothing to hide labuser9 on lab-host-9' >"$FX/denials.txt"
+  rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+  expect "host forms: scutil [$mode] does not fail the report" "$RC" 0
+  expect_has "host forms: scutil [$mode] leaves the other forms replaced" "$OUT" "- nothing to hide <user> on <host>"
+done
+# No scutil at all (not darwin): a PATH with only the tools the report needs.
+rfix r5e
+mkdir -p "$FX/tools"
+for t in bash sh awk tr grep wc cat env git sort cut sed dirname shasum sleep kill uname head tail printf test; do
+  p=$(command -v "$t" 2>/dev/null || true)
+  [[ -z $p || ! -x $p ]] || ln -s "$p" "$FX/tools/$t"
+done
+mv "$FX/bin/scutil" "$FX/bin/scutil.gone"
+nopath="$FX/bin:$FX/tools"
+expect "host forms: the control PATH has no scutil" "$(PATH=$nopath command -v scutil || echo none)" "none"
+printf '%s\n' 'nothing to hide labuser9 on lab-host-9' >"$FX/denials.txt"
+EXTRA_ENV="PATH=$nopath" rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+expect "host forms: no scutil at all does not fail the report" "$RC" 0
+expect_has "host forms: no scutil at all leaves the other forms replaced" "$OUT" "- nothing to hide <user> on <host>"
 # A HOME of / or empty is not substituted (that would rewrite every path).
 printf '%s\n' 'see /etc/hosts' >"$FX/denials.txt"
 OUT=$(cd "$FX" && env -i HOME=/ TMPDIR="$WORK" PATH="$FX/bin:$PATH" "$FX/lab/run" exec lab/report 04 --nonce "$NONCE" --denials "$FX/denials.txt" 2>&1) && RC=0 || RC=$?
