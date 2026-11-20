@@ -9,7 +9,9 @@ Default mode reads DIR/.claude/settings.json (DIR defaults to the directory
 above lab/) and prints one line per check, then a count:
 
   C-set-1  no key of the auto-mode family in any file under DIR
-  C-set-2  every Bash allow is one of the granted lines (marvel get, doctor,
+  C-set-2  every allow names one of the three granted tools, Bash, Read or
+           Edit, in exact case (any other tool FAILs); every Bash allow is one
+           of the granted lines (marvel get, doctor,
            capture, events; bd show, ready; just lab rung, check, report) and
            nothing else; no bare tool, MCP tool or wildcard allow, no bypass
            mode, no env block, no MCP servers
@@ -72,6 +74,9 @@ BASH_GRANTS = [
     ("bd", "show"), ("bd", "ready"),
     ("just", "lab", "rung"), ("just", "lab", "check"), ("just", "lab", "report"),
 ]
+# The only tool names an allow may use, in exact case. Anything else FAILs,
+# whatever its spec: a tool the lab does not grant stays ungranted.
+GRANTED_TOOLS = {"Bash", "Read", "Edit"}
 # Characters that make a prefix more than words: command separators, pipes,
 # redirects, substitutions, quoting, escapes and globs.
 SHELL_META = set(";&|<>$`\\\"'(){}*?!~#\n\r\t")
@@ -209,8 +214,8 @@ def check_2(doc):
     denies = set(denies or []) | set(REQUIRED_DENY)
     for rule in allows:
         tool, spec = split_rule(rule)
-        if tool.startswith("mcp__"):
-            bad.append("allow %s" % rule)
+        if tool not in GRANTED_TOOLS:
+            bad.append("allow %r (tool is not one of %s)" % (rule, ", ".join(sorted(GRANTED_TOOLS))))
         elif spec is None:
             bad.append("bare allow %s" % rule)
         elif rule.strip() in denies:
@@ -219,9 +224,8 @@ def check_2(doc):
             why = bash_problem(spec)
             if why:
                 bad.append("allow %s (%s)" % (rule, why))
-        elif tool in PATH_TOOLS:
-            if "*" in strip_wildcard_suffix(spec):
-                bad.append("allow %s" % rule)
+        elif "*" in strip_wildcard_suffix(spec):
+            bad.append("allow %s" % rule)
     if bad:
         return False, "; ".join(bad)
     return True, "no forbidden allow, mode or key"
