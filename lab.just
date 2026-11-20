@@ -3,6 +3,7 @@
 rung $n:
     #!/usr/bin/env bash
     set -euo pipefail
+    [[ $n =~ ^[0-9]+[a-z]?$ ]] || { echo "lab: bad rung id" >&2; exit 1; }
     for f in lab/rung/"$n"-*.md; do
       if [[ -e $f ]]; then cat "$f"; exit 0; fi
     done
@@ -19,6 +20,7 @@ check $n:
 report $n:
     #!/usr/bin/env bash
     set -euo pipefail
+    [[ $n =~ ^[0-9]+[a-z]?$ ]] || { echo "lab: bad rung id" >&2; exit 1; }
     if [[ ! -x lab/report ]]; then
       echo "lab: lab/report does not exist yet" >&2
       exit 1
