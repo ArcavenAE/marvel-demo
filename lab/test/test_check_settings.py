@@ -498,6 +498,47 @@ def test_allowlist():
            shipped == sorted(GRANTED_LINES), "shipped %r" % shipped)
 
 
+def test_tool_allowlist():
+    """C-set-2 allowlists tool names too: the only names that pass are the
+    three F1 grants, Bash, Read and Edit, in exact case. Any other tool FAILs,
+    whatever its spec looks like."""
+    rules = [
+        # The examples from the review.
+        "PowerShell(*)", "WebFetch(domain:*)", "Agent(*)", "Skill(*)", "bash(sh -c:*)",
+        # Write and other tools with a spec.
+        "Write(./lab/x)", "Write(./lab/**)", "Write(*)", "NotebookEdit(./lab/x)",
+        "MultiEdit(./lab/x)", "Task(x)", "WebSearch(x)", "WebFetch(x)", "Glob(*)", "Grep(x)",
+        "TodoWrite(x)", "SlashCommand(x)", "KillShell(x)", "BashOutput(x)", "mcp__x__y(z)",
+        "PowerShell(marvel get:*)", "Agent(marvel get)", "Skill(lab)",
+        # Case variants and near misses of the three granted tools.
+        "read(./lab/**)", "READ(./lab/**)", "rEad(./lab/**)", "edit(./lab/**)", "EDIT(./lab/**)",
+        "bash(marvel get:*)", "BASH(marvel get:*)", "bAsh(marvel get:*)",
+        "Bash (marvel get:*)", "Read (./lab/**)", "Edit (./lab/**)",
+        "Bash(marvel get:*", "Read(./lab/**", "Read(./lab/**) x", "Bash(marvel get:*) x",
+        "BashX(marvel get:*)", "Readx(./lab/**)", "Editor(./lab/**)", "(marvel get:*)", "()",
+        "", " ",
+    ]
+    for rule in rules:
+        expect_fail("tool allowlist: %r fails C-set-2" % rule, "C-set-2",
+                    mutate=lambda d, r=rule: allow(d).append(r))
+    # Controls: the shipped Read and Edit allows pass, and so do other
+    # ./lab specs and all nine Bash grants (the last are covered above).
+    base = load_settings()
+    shipped = (base or {}).get("permissions", {}).get("allow", [])
+    record("tool allowlist: the shipped allows hold Read(./lab/**) and Edit(./lab/**)",
+           "Read(./lab/**)" in shipped and "Edit(./lab/**)" in shipped, "shipped %r" % shipped)
+    expect_pass("tool allowlist: control, the shipped settings pass C-set-2", "C-set-2")
+    expect_pass("tool allowlist: control, Read(./lab/notes.md) passes C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Read(./lab/notes.md)"))
+    expect_pass("tool allowlist: control, Edit(./lab/notes.md) passes C-set-2", "C-set-2",
+                mutate=lambda d: allow(d).append("Edit(./lab/notes.md)"))
+    # Dropping the shipped Read allow leaves the others passing: the check
+    # judges what is present, it does not require the set.
+    expect_pass("tool allowlist: control, a file without the Read allow still passes C-set-2", "C-set-2",
+                mutate=lambda d: d["permissions"].update(
+                    {"allow": [r for r in d["permissions"]["allow"] if r != "Read(./lab/**)"]}))
+
+
 def test_failopen_types():
     """A value of the wrong type must fail, never be skipped."""
     expect_fail_all("fail-open 2: allow as a string fails C-set-2 and C-set-4", ["C-set-2", "C-set-4"],
@@ -622,7 +663,7 @@ def main():
     print("home for this run is a scratch directory under", scratch_root)
     for fn in (test_baseline, test_cset1, test_cset2, test_cset3, test_cset4,
                test_input_errors, test_cset5, test_no_writes_to_home,
-               test_failopen_first_word, test_allowlist, test_failopen_types, test_failopen_commands,
+               test_failopen_first_word, test_allowlist, test_tool_allowlist, test_failopen_types, test_failopen_commands,
                test_failopen_unreadable, test_failopen_user_settings):
         fn()
     passed = sum(1 for _, ok, _ in results if ok)
