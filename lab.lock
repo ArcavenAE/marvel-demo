@@ -5,14 +5,19 @@
 #     contain <expected>. A different or missing version prints a WARN and does
 #     not fail the run.
 #
+#   `release <name> <tag>`
+#     The release a rung expects (for example `release director-mcp <tag>`).
+#     lab/run ignores this line; the check for that rung reads it. With no
+#     line, the rung reads SKIP and says what is missing.
+#
 #   digest <path> <sha256>
 #     The sha256 of a check script. A script whose digest differs, or that has
 #     no line here, FAILs and is not run. `lab/run digests` prints the lines.
 #
 digest lab/check/0a-marvel.sh 096065b2699bbdeec2418f4ad7800426ec7d60be82ea9dac56d8e51f530fee0e
 digest lab/check/0b-denial.sh afae7840f9f3b8522b83a24a30384a0396260dc45fb8ed0d6a496ddf7a6b93bc
-digest lab/check/0c-keepawake.sh f6ad7ef584610fee8f3612911a4290aacb4fe6d362af7c86fe19d9db354f5d80
+digest lab/check/0c-keepawake.sh b7c8a9073e333bb8d3a72b11459cc93948a0985cc807cedd02cba65ab8406c34
 digest lab/check/0d-bus.sh 2c207178550414eb3f3c02ae21ed45ae10fd957edd8f47e70102dce88c234cf0
-digest lab/check/0e-director.sh 1979d17bb86d97db16e63ffb525d03dc4e0d783b77b117aba5d358e7f669b671
+digest lab/check/0e-director.sh 233a71d3cc8eee84ed723b285f5462baba26199a416d7b0f3057388e417a85fa
 digest lab/check/0f-bd.sh 912b4dfe321b37cc38f39c097a55ee009dc3116be73abe3af8235b66a8460c28
 digest lab/check/0g-wardrobe.sh 3f0be9ff1e14c6d192c29cf48b8a61ec3dfad173f0ac6b32c3f7b09d2680a173
