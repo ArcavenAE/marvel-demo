@@ -280,7 +280,9 @@ rfix() {
     'cat >"$(dirname "$0")/../gh.stdin"' \
     'printf "%s %s\n" "${GH_REPO:-}" "${GH_HOST:-}" >"$(dirname "$0")/../gh.env"' \
     'exit "${GH_STUB_EXIT:-0}"' >"$FX/bin/gh"
-  chmod +x "$FX/bin/id" "$FX/bin/hostname" "$FX/bin/gh"
+  printf '%s\n' '#!/bin/sh' \
+    'case "$*" in "--get LocalHostName") echo lab-local-9 ;; "--get ComputerName") echo "Lab Mac 9" ;; *) exit 1 ;; esac' >"$FX/bin/scutil"
+  chmod +x "$FX/bin/id" "$FX/bin/hostname" "$FX/bin/gh" "$FX/bin/scutil"
   git init -q "$FX"
   git -C "$FX" remote add origin "${2:-https://github.com/own/lab.git}"
   lock
@@ -413,6 +415,13 @@ expect "addition A: the verifier still accepts the substituted report" "$VRC" 0
 printf '%s\n' 'mylabuser9 labuser9x labuser9_y' >"$FX/denials.txt"
 rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
 expect_has "addition A: a word containing the user name stays" "$OUT" "- mylabuser9 labuser9x labuser9_y"
+# The macOS names: LocalHostName (and its .local form) and ComputerName differ
+# from hostname and hostname -s, and every one of them becomes <host>.
+printf '%s\n' 'bonjour lab-local-9.local, bare lab-local-9, named Lab Mac 9, and lab-local-9x stays' >"$FX/denials.txt"
+rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
+expect_not "host forms: the .local name does not appear" "$OUT" "lab-local-9.local"
+expect_not "host forms: the ComputerName does not appear" "$OUT" "Lab Mac 9"
+expect_has "host forms: the .local name and the bare name both become <host>" "$OUT" "- bonjour <host>, bare <host>, named <host>, and lab-local-9x stays"
 # A HOME of / or empty is not substituted (that would rewrite every path).
 printf '%s\n' 'see /etc/hosts' >"$FX/denials.txt"
 OUT=$(cd "$FX" && env -i HOME=/ TMPDIR="$WORK" PATH="$FX/bin:$PATH" "$FX/lab/run" exec lab/report 04 --nonce "$NONCE" --denials "$FX/denials.txt" 2>&1) && RC=0 || RC=$?
