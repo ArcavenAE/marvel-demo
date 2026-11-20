@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# lab/run: the lab kit's check harness.
+#
+#   lab/run check <id>    run one check and print its verdict
+#   lab/run check all     run every check in order, stop at the first FAIL
+#   lab/run digests       print a `digest` line for every check script, ready
+#                         to paste into lab.lock
+#
+# A check is a script at lab/check/<id>-<name>.sh. It prints exactly one line
+# that starts with `RUNG `, in one of three shapes, and exits to match:
+#
+#   RUNG <id> PASS                      exit 0
+#   RUNG <id> SKIP <reason>             exit 0 (a skip is never a pass)
+#   RUNG <id> FAIL <check-id>: <seen>   exit 1
+#
+# The harness runs a script only if its sha256 matches the `digest` line in
+# lab.lock. A changed script FAILs as H-digest and is not run. Version drift
+# against the `version` lines in lab.lock prints a WARN and never fails.
+#
+# Every rung prints exactly one `RUNG` line: the check's verdict if it is
+# well formed, or a FAIL whose check id starts with `H-` if the harness
+# refused to run the check or could not trust what it printed.
+#
+# Needs only bash (3.2 is enough), grep, awk, sort, cut and shasum or
+# sha256sum. It reads nothing outside this tree and dials nothing.
+
+set -euo pipefail
+
+LAB_ROOT=${LAB_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+LOCK=$LAB_ROOT/lab.lock
+CHECK_DIR=$LAB_ROOT/lab/check
+
+usage() {
+  printf 'usage: lab/run check <id|all> | lab/run digests\n' >&2
+  exit 2
+}
+
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  else
+    sha256sum "$1" | cut -d' ' -f1
+  fi
+}
+
+# Check ids in run order: the number first, then the letter, so 0a to 0g come
+# before 01, and 02 before 10.
+list_ids() {
+  local f b id digits letters
+  for f in "$CHECK_DIR"/*.sh; do
+    [[ -e $f ]] || continue
+    b=${f##*/}
+    id=${b%%-*}
+    [[ $id =~ ^[0-9]+[a-z]?$ ]] || continue
+    digits=${id%%[a-z]}
+    letters=${id#"$digits"}
+    printf '%05d%s %s\n' "$((10#$digits))" "$letters" "$id"
+  done | sort | cut -d' ' -f2 | uniq
+}
+
+# Sets FOUND (the last match) and FOUND_N (how many scripts match the id).
+find_script() {
+  local f
+  FOUND=""
+  FOUND_N=0
+  for f in "$CHECK_DIR/$1"-*.sh; do
+    [[ -e $f ]] || continue
+    FOUND=$f
+    FOUND_N=$((FOUND_N + 1))
+  done
+}
+
+lock_digest() {
+  awk -v p="$1" '$1 == "digest" && $2 == p { print $3; exit }' "$LOCK"
+}
+
+# lab.lock lines: `version <name> <expected> <command words...>`. The command
+# is split into words and run directly, never through a shell. A tool that is
+# missing or reports something else is a WARN, because brew cannot pin a
+# version and the rungs themselves test what matters.
+warn_on_drift() {
+  [[ -f $LOCK ]] || return 0
+  local kind name expected cmd found
+  local -a words
+  while read -r kind name expected cmd; do
+    [[ $kind == version ]] || continue
+    read -r -a words <<<"$cmd"
+    if [[ ${#words[@]} -eq 0 ]] || ! command -v "${words[0]}" >/dev/null 2>&1; then
+      printf 'WARN version %s: lock %s, not found\n' "$name" "$expected"
+      continue
+    fi
+    found=$("${words[@]}" 2>&1 | head -n 1) || true
+    case $found in
+      *"$expected"*) ;;
+      *) printf 'WARN version %s: lock %s, found %s\n' "$name" "$expected" "$found" ;;
+    esac
+  done <"$LOCK"
+}
+
+# Run one check. Prints its non-verdict output, then exactly one RUNG line.
+# Sets LAST to pass, skip or fail.
+run_one() {
+  local id=$1 script rel want got out rc body verdict count re
+  LAST=fail
+  if [[ ! -f $LOCK ]]; then
+    printf 'RUNG %s FAIL H-nolock: lab.lock not found\n' "$id"
+    return 1
+  fi
+  find_script "$id"
+  if [[ $FOUND_N -eq 0 ]]; then
+    printf 'RUNG %s FAIL H-missing: no script lab/check/%s-*.sh\n' "$id" "$id"
+    return 1
+  fi
+  if [[ $FOUND_N -gt 1 ]]; then
+    printf 'RUNG %s FAIL H-ambiguous: %s scripts match lab/check/%s-*.sh\n' "$id" "$FOUND_N" "$id"
+    return 1
+  fi
+  script=$FOUND
+  rel=lab/check/${script##*/}
+  want=$(lock_digest "$rel")
+  if [[ -z $want ]]; then
+    printf 'RUNG %s FAIL H-nodigest: %s has no digest line in lab.lock\n' "$id" "$rel"
+    return 1
+  fi
+  got=$(sha256_of "$script")
+  if [[ $got != "$want" ]]; then
+    printf 'RUNG %s FAIL H-digest: %s is %s, lab.lock has %s\n' "$id" "$rel" "$got" "$want"
+    return 1
+  fi
+
+  out=$(cd "$LAB_ROOT" && bash "$script" 2>&1) && rc=0 || rc=$?
+  body=$(printf '%s\n' "$out" | grep -v '^RUNG ' || true)
+  [[ -z $body ]] || printf '%s\n' "$body"
+  verdict=$(printf '%s\n' "$out" | grep '^RUNG ' || true)
+  count=0
+  [[ -z $verdict ]] || count=$(printf '%s\n' "$verdict" | wc -l | tr -d ' ')
+  if [[ $count -ne 1 ]]; then
+    printf 'RUNG %s FAIL H-noverdict: %s printed %s RUNG lines, expected 1 (exit %s)\n' "$id" "$rel" "$count" "$rc"
+    return 1
+  fi
+
+  if [[ $verdict == "RUNG $id PASS" ]]; then
+    if [[ $rc -ne 0 ]]; then
+      printf 'RUNG %s FAIL H-mismatch: %s printed PASS but exited %s\n' "$id" "$rel" "$rc"
+      return 1
+    fi
+    printf '%s\n' "$verdict"
+    LAST=pass
+    return 0
+  fi
+  re="^RUNG $id SKIP .+$"
+  if [[ $verdict =~ $re ]]; then
+    if [[ $rc -ne 0 ]]; then
+      printf 'RUNG %s FAIL H-mismatch: %s printed SKIP but exited %s\n' "$id" "$rel" "$rc"
+      return 1
+    fi
+    printf '%s\n' "$verdict"
+    LAST=skip
+    return 0
+  fi
+  re="^RUNG $id FAIL [^ ]+: .+$"
+  if [[ $verdict =~ $re ]]; then
+    if [[ $rc -ne 1 ]]; then
+      printf 'RUNG %s FAIL H-mismatch: %s printed FAIL but exited %s\n' "$id" "$rel" "$rc"
+      return 1
+    fi
+    printf '%s\n' "$verdict"
+    return 1
+  fi
+  printf 'RUNG %s FAIL H-shape: %s printed a RUNG line in none of the three shapes\n' "$id" "$rel"
+  return 1
+}
+
+cmd_check() {
+  local want=${1:-} id pass=0 skip=0
+  [[ -n $want ]] || usage
+  warn_on_drift
+  if [[ $want != all ]]; then
+    [[ $want =~ ^[0-9]+[a-z]?$ ]] || usage
+    run_one "$want" && exit 0
+    exit 1
+  fi
+  local ids
+  ids=$(list_ids)
+  if [[ -z $ids ]]; then
+    printf 'LAB check all: no checks found in lab/check\n'
+    exit 1
+  fi
+  for id in $ids; do
+    if run_one "$id"; then
+      if [[ $LAST == skip ]]; then skip=$((skip + 1)); else pass=$((pass + 1)); fi
+    else
+      printf 'LAB check all: %s pass, %s skip, stopped at %s\n' "$pass" "$skip" "$id"
+      exit 1
+    fi
+  done
+  printf 'LAB check all: %s pass, %s skip\n' "$pass" "$skip"
+}
+
+cmd_digests() {
+  local f
+  for f in "$CHECK_DIR"/*.sh; do
+    [[ -e $f ]] || continue
+    printf 'digest lab/check/%s %s\n' "${f##*/}" "$(sha256_of "$f")"
+  done
+}
+
+case ${1:-} in
+  check) shift; cmd_check "$@" ;;
+  digests) cmd_digests ;;
+  *) usage ;;
+esac
