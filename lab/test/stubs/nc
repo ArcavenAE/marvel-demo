@@ -1,0 +1,5 @@
+#!/bin/sh
+# Test stub for nc -z HOST PORT. Exit code from $LABT_STATE/nc.HOST.PORT, else 1.
+f="$LABT_STATE/nc.$2.$3"
+[ -f "$f" ] && exit "$(cat "$f")"
+exit 1

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Test stub for marvel. Answers come from files in $LABT_STATE.
+. "$(dirname "$0")/.sessionpid"
+S=$LABT_STATE
+case "$1" in
+  doctor) cat "$S/doctor.out"; exit "$(cat "$S/doctor.rc")" ;;
+  version) cat "$S/version.out"; [ -f "$S/version.fail" ] && exit 1; exit 0 ;;
+  plan)
+    # Like marvel main: plan -f without --prune is refused (the full plan is not built).
+    case " $* " in
+      *" -f "*) case " $* " in *" --prune "*) ;; *) echo "marvel plan -f needs --prune: the full manifest plan is not built yet" >&2; exit 1 ;; esac ;;
+    esac
+    exit "$(cat "$S/plan.rc")" ;;
+  bus) cat "$S/bus.out" ;;
+  kill) [ -f "$S/kill.noop" ] || date +%s >"$S/kill.at" ;;
+  get)
+    if [ -f "$S/sessions.none" ]; then echo '[]'; exit 0; fi
+    p=$(curpid)
+    if [ "$p" = 0 ]; then st=pending; else st=running; fi
+    printf '[{"Name":"keepawake-caffeinate-g1-0","Workspace":"host","Team":"keepawake","Role":"caffeinate","State":"%s","PID":%s}]\n' "$st" "$p" ;;
+esac

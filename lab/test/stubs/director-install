@@ -1,0 +1,4 @@
+#!/bin/sh
+# Test stub for director-install. --status always exits 0, like the real one.
+[ "$1" = --status ] && cat "$LABT_STATE/dstatus.out"
+exit 0
