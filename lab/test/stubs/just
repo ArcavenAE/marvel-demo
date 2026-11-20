@@ -1,0 +1,4 @@
+#!/bin/sh
+# Test stub for just root: prints the reason from $LABT_STATE/justroot.out.
+[ "$1" = root ] && cat "$LABT_STATE/justroot.out"
+exit 0

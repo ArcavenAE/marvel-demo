@@ -1,0 +1,4 @@
+#!/bin/sh
+# Test stub for ipconfig getifaddr en0: the LAN address from $LABT_STATE/lan.ip.
+[ "$1" = getifaddr ] && [ "$2" = en0 ] && [ -f "$LABT_STATE/lan.ip" ] && { cat "$LABT_STATE/lan.ip"; exit 0; }
+exit 1

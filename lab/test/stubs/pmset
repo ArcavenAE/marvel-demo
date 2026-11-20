@@ -1,0 +1,15 @@
+#!/bin/sh
+# Test stub for pmset -g assertions. The owner pid follows pmset.mode.
+. "$(dirname "$0")/.sessionpid"
+S=$LABT_STATE
+echo "Assertion status system-wide:"
+echo "   PreventUserIdleSystemSleep     1"
+echo "Listed by owning process:"
+case $(cat "$S/pmset.mode") in
+  normal) p=$(curpid) ;;
+  stale) p=$(cat "$S/keep.pid") ;;
+  *) p=0 ;;
+esac
+if [ "$p" != 0 ]; then
+  echo "   pid $p(caffeinate): [0x0091c00c00019034] 00:00:42 PreventUserIdleSystemSleep named: \"caffeinate command-line tool\""
+fi
