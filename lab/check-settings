@@ -9,8 +9,10 @@ Default mode reads DIR/.claude/settings.json (DIR defaults to the directory
 above lab/) and prints one line per check, then a count:
 
   C-set-1  no key of the auto-mode family in any file under DIR
-  C-set-2  no allow rule on the forbidden list, no bypass mode, no env block,
-           no MCP servers
+  C-set-2  every Bash allow is one of the granted lines (marvel get, doctor,
+           capture, events; bd show, ready; just lab rung, check, report) and
+           nothing else; no bare tool, MCP tool or wildcard allow, no bypass
+           mode, no env block, no MCP servers
   C-set-3  every required deny is present
   C-set-4  no path outside the project directory in an allow rule or in any
            command the settings run (hooks, statusLine, apiKeyHelper and the
@@ -61,14 +63,18 @@ REQUIRED_DENY = [
     "Edit(./lab/HARNESS.md)",
 ]
 
-# Tools the lab keeps narrow: an allow that names only the tool grants it all.
-NARROW_ONLY = {"marvel", "gh", "tmux"}
-# Shells and interpreters: an allow whose first word is one of these grants
-# arbitrary code, whatever follows it (bash -c, python3 -c, env A=1 ...).
-INTERPRETERS = {
-    "bash", "sh", "zsh", "env", "sudo", "ssh", "curl", "wget", "python", "perl",
-    "ruby", "node", "npx", "eval", "exec", "xargs",
-}
+# The Bash lines the lab grants, and nothing else. A Bash allow passes only if
+# its words start with one of these prefixes, spelled exactly (case, quoting
+# and path included). Everything else FAILs: a list of bad first words can
+# never be finished, a list of the granted ones can.
+BASH_GRANTS = [
+    ("marvel", "get"), ("marvel", "doctor"), ("marvel", "capture"), ("marvel", "events"),
+    ("bd", "show"), ("bd", "ready"),
+    ("just", "lab", "rung"), ("just", "lab", "check"), ("just", "lab", "report"),
+]
+# Characters that make a prefix more than words: command separators, pipes,
+# redirects, substitutions, quoting, escapes and globs.
+SHELL_META = set(";&|<>$`\\\"'(){}*?!~#\n\r\t")
 # Settings whose value is a command line run by the harness.
 HELPER_KEYS = {"apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
                "otelHeadersHelper"}
@@ -171,20 +177,19 @@ def get_rules(perm, key):
 
 def bash_problem(spec):
     """Why a Bash allow spec is too broad, or None."""
-    core = strip_wildcard_suffix(spec).strip()
-    if "*" in core or not core:
-        return "wildcard or empty command"
-    words = core.split()
-    while words and "=" in words[0] and not words[0].startswith(("=", "-")):
-        words = words[1:]
-    if not words:
-        return "no command"
-    first = os.path.basename(words[0]).rstrip("0123456789.")
-    if first in INTERPRETERS:
-        return "first word %s runs arbitrary code" % words[0]
-    if len(words) == 1 and first in NARROW_ONLY:
-        return "%s with no verb" % words[0]
-    return None
+    core = strip_wildcard_suffix(spec)
+    if not core.strip():
+        return "empty command"
+    meta = sorted(set(core) & SHELL_META)
+    if meta:
+        return "shell character %r in the command" % "".join(meta)
+    words = core.split(" ")
+    if "" in words:
+        return "irregular spacing"
+    for grant in BASH_GRANTS:
+        if tuple(words[:len(grant)]) == grant:
+            return None
+    return "not one of the granted lines (%s)" % ", ".join(" ".join(g) for g in BASH_GRANTS)
 
 
 def check_2(doc):
