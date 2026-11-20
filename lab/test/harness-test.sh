@@ -169,6 +169,21 @@ expect_has "a hung version command does not stop the check" "$OUT" "RUNG 01 PASS
 expect "a hung version command exits 0" "$RC" 0
 if [[ $elapsed -lt 10 ]]; then ok "the run ended within 10s (took ${elapsed}s)"; else bad "the run took ${elapsed}s"; fi
 
+# A version command that ignores TERM is stopped too.
+fixture c-stubborn
+printf '%s\n' '#!/bin/sh' 'trap "" TERM' 'while :; do sleep 1; done' >"$FX/bin/stubborn"
+chmod +x "$FX/bin/stubborn"
+check 01-pass.sh 'echo "RUNG 01 PASS"'
+printf '%s\n' 'version stubborn 1.0.0 stubborn --version' >>"$FX/lab.lock"
+lock
+start=$SECONDS
+LAB_VERSION_TIMEOUT=1 lab check 01
+elapsed=$((SECONDS - start))
+expect_has "a version command that ignores TERM WARNs" "$OUT" "WARN version stubborn: lock 1.0.0, no answer in 1s"
+expect "a version command that ignores TERM exits 0" "$RC" 0
+if [[ $elapsed -lt 10 ]]; then ok "the run ended within 10s (took ${elapsed}s)"; else bad "the run took ${elapsed}s"; fi
+expect_not "no job notice leaks into the output" "$OUT" "Terminated"
+
 fixture h-nolock
 check 01-pass.sh 'echo "RUNG 01 PASS"'
 mv "$FX/lab.lock" "$FX/lab.lock.gone"

@@ -75,24 +75,61 @@ lock_digest() {
 }
 
 # lab.lock lines: `version <name> <expected> <command words...>`. The command
-# is split into words and run directly, never through a shell. A tool that is
-# missing or reports something else is a WARN, because brew cannot pin a
-# version and the rungs themselves test what matters.
+# is split into words and run directly, never through a shell, with no stdin
+# and a time limit of LAB_VERSION_TIMEOUT seconds (default 5). A tool that is
+# missing, reports something else, or does not answer in time is a WARN and
+# never a FAIL, because brew cannot pin a version and the rungs themselves
+# test what matters. A tool that is stopped at the limit is stopped by its pid;
+# a process it started itself is not tracked.
+VERSION_TIMEOUT=${LAB_VERSION_TIMEOUT:-5}
+[[ $VERSION_TIMEOUT =~ ^[1-9][0-9]*$ ]] || VERSION_TIMEOUT=5
+
+# probe_version <words...>: sets PROBE_OUT to the first output line and
+# PROBE_TIMED_OUT to 1 or 0. No here-string: bash 3.2 writes those to /tmp.
+probe_version() {
+  local out pid ticks=0
+  PROBE_OUT=""
+  PROBE_TIMED_OUT=0
+  out=$(mktemp "${TMPDIR:-/tmp}/lab-version.XXXXXX") || return 0
+  "$@" >"$out" 2>&1 </dev/null &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ $ticks -ge $((VERSION_TIMEOUT * 10)) ]]; then
+      PROBE_TIMED_OUT=1
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 0.2
+      if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
+      break
+    fi
+    sleep 0.1
+    ticks=$((ticks + 1))
+  done
+  wait "$pid" 2>/dev/null || true
+  PROBE_OUT=$(head -n 1 "$out")
+  rm -f "$out"
+}
+
 warn_on_drift() {
   [[ -f $LOCK ]] || return 0
-  local kind name expected cmd found
+  local kind name expected cmd
   local -a words
   while read -r kind name expected cmd; do
     [[ $kind == version ]] || continue
-    read -r -a words <<<"$cmd"
+    set -f
+    words=($cmd)
+    set +f
     if [[ ${#words[@]} -eq 0 ]] || ! command -v "${words[0]}" >/dev/null 2>&1; then
       printf 'WARN version %s: lock %s, not found\n' "$name" "$expected"
       continue
     fi
-    found=$("${words[@]}" 2>&1 | head -n 1) || true
-    case $found in
+    probe_version "${words[@]}" 2>/dev/null
+    if [[ $PROBE_TIMED_OUT -eq 1 ]]; then
+      printf 'WARN version %s: lock %s, no answer in %ss\n' "$name" "$expected" "$VERSION_TIMEOUT"
+      continue
+    fi
+    case $PROBE_OUT in
       *"$expected"*) ;;
-      *) printf 'WARN version %s: lock %s, found %s\n' "$name" "$expected" "$found" ;;
+      *) printf 'WARN version %s: lock %s, found %s\n' "$name" "$expected" "$PROBE_OUT" ;;
     esac
   done <"$LOCK"
 }
