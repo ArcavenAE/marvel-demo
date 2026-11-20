@@ -68,9 +68,8 @@ POLL=${LAB_WAIT:-30}
 command -v marvel >/dev/null 2>&1 || fail C-r0-c "marvel is not on PATH"
 command -v pmset >/dev/null 2>&1 || fail C-r0-c "pmset is not on PATH"
 
-# The keepawake file is one marvel accepts.
-bounded "$WAIT" marvel plan -f manifests/keepawake.toml
-[[ $B_RC -eq 0 ]] || fail C-r0-c "marvel plan rejects manifests/keepawake.toml (exit $B_RC): $B_OUT"
+# marvel accepting the keepawake file is shown by its session row below;
+# `marvel plan -f` is not used (it needs --prune and does not build a full plan yet).
 
 # session_row: sets S_STATE, S_PID, S_WS, S_NAME from the keepawake session.
 session_row() {

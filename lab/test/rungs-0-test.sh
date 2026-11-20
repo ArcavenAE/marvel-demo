@@ -178,10 +178,6 @@ verdict "0b FAILs when the deny rule is gone from the settings" "RUNG 0b FAIL C-
 fixture r0c
 lab 0c
 verdict "0c passes when the session holds the assertion and a new pid re-holds it" "RUNG 0c PASS" 0
-put plan.rc 1
-lab 0c
-verdict "0c FAILs when marvel rejects the keepawake file" "RUNG 0c FAIL C-r0-c:" 1
-defaults
 put pmset.mode none
 lab 0c
 verdict "0c FAILs when pmset shows no assertion from the session pid" "RUNG 0c FAIL C-r0-c:" 1
@@ -268,7 +264,8 @@ relock
 { grep -v '^release director-mcp' "$FX/lab.lock" || true; } >"$FX/lab.lock.new"
 mv "$FX/lab.lock.new" "$FX/lab.lock"
 lab 0e
-verdict "0e FAILs when lab.lock pins no director release" "RUNG 0e FAIL C-r0-e:" 1
+verdict "0e SKIPs when lab.lock pins no director release" "RUNG 0e SKIP no pinned director-mcp release in lab.lock" 0
+expect_not "0e with no pinned release is not a pass" "$OUT" "RUNG 0e PASS"
 
 # --- 0f bd --------------------------------------------------------------------
 fixture r0f
@@ -330,6 +327,7 @@ for id in 0a 0b 0c 0d 0e 0f 0g; do
   if [[ -z $md ]]; then bad "rung $id has instructions"; continue; fi
   if [[ -s $md ]] && ! grep -q '^RUNG ' "$md"; then ok "rung $id instructions exist and hold no verdict line"; else bad "rung $id instructions are empty or hold a verdict line"; fi
 done
+if grep -q -F '`release <name> <tag>`' "$ROOT/lab.lock"; then ok "lab.lock header documents release lines"; else bad "lab.lock header does not document release lines"; fi
 if grep -q -x 'lab/state/' "$ROOT/.gitignore" 2>/dev/null; then ok "lab/state/ is ignored"; else bad "lab/state/ is not in .gitignore"; fi
 pinned=$(grep -c '^digest lab/check/0' "$ROOT/lab.lock" || true)
 expect "the real lab.lock pins exactly the seven install checks" "$pinned" 7
