@@ -156,7 +156,7 @@ if [[ -e $FX/ran-a || -e $FX/ran-b ]]; then bad "ambiguous ran a script"; else o
 
 # A version command that never answers must not hang the run.
 fixture c-timeout
-printf '%s\n' '#!/bin/sh' 'exec sleep 30' >"$FX/bin/hangtool"
+printf '%s\n' '#!/bin/sh' 'echo $$ >"$(dirname "$0")/hang.pid"' 'exec sleep 30' >"$FX/bin/hangtool"
 chmod +x "$FX/bin/hangtool"
 check 01-pass.sh 'echo "RUNG 01 PASS"'
 printf '%s\n' 'version hangtool 1.0.0 hangtool --version' >>"$FX/lab.lock"
@@ -168,6 +168,8 @@ expect_has "a hung version command WARNs" "$OUT" "WARN version hangtool: lock 1.
 expect_has "a hung version command does not stop the check" "$OUT" "RUNG 01 PASS"
 expect "a hung version command exits 0" "$RC" 0
 if [[ $elapsed -lt 10 ]]; then ok "the run ended within 10s (took ${elapsed}s)"; else bad "the run took ${elapsed}s"; fi
+hung=$(cat "$FX/bin/hang.pid")
+if kill -0 "$hung" 2>/dev/null; then bad "the hung version command is still running (pid $hung)"; else ok "the hung version command was stopped"; fi
 
 # A version command that ignores TERM is stopped too.
 fixture c-stubborn

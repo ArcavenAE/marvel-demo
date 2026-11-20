@@ -85,28 +85,30 @@ VERSION_TIMEOUT=${LAB_VERSION_TIMEOUT:-5}
 [[ $VERSION_TIMEOUT =~ ^[1-9][0-9]*$ ]] || VERSION_TIMEOUT=5
 
 # probe_version <words...>: sets PROBE_OUT to the first output line and
-# PROBE_TIMED_OUT to 1 or 0. No here-string: bash 3.2 writes those to /tmp.
+# PROBE_TIMED_OUT to 1 or 0. The command runs behind a process substitution
+# that first prints its own pid, so it can be stopped by that pid. No temp
+# file and no here-string: bash 3.2 writes here-strings to /tmp.
 probe_version() {
-  local out pid ticks=0
+  local pid="" line="" rc=0 start
   PROBE_OUT=""
   PROBE_TIMED_OUT=0
-  out=$(mktemp "${TMPDIR:-/tmp}/lab-version.XXXXXX") || return 0
-  "$@" >"$out" 2>&1 </dev/null &
-  pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    if [[ $ticks -ge $((VERSION_TIMEOUT * 10)) ]]; then
-      PROBE_TIMED_OUT=1
-      kill -TERM "$pid" 2>/dev/null || true
-      sleep 0.2
-      if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
-      break
-    fi
-    sleep 0.1
-    ticks=$((ticks + 1))
-  done
-  wait "$pid" 2>/dev/null || true
-  PROBE_OUT=$(head -n 1 "$out")
-  rm -f "$out"
+  exec 7< <(exec sh -c 'echo $$; exec "$@" 2>&1 </dev/null' sh "$@")
+  read -r -t "$VERSION_TIMEOUT" pid <&7 || true
+  start=$SECONDS
+  read -r -t "$VERSION_TIMEOUT" line <&7 || rc=$?
+  # bash 3.2's read -t returns 1 on a timeout, the same as on end of input, so
+  # a timeout is: no line, the time spent, and the command still running.
+  if [[ $rc -ne 0 && -z $line && $((SECONDS - start)) -ge $VERSION_TIMEOUT ]] &&
+    [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
+    PROBE_TIMED_OUT=1
+  fi
+  PROBE_OUT=$line
+  if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 0.2
+    if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
+  fi
+  exec 7<&-
 }
 
 warn_on_drift() {
@@ -122,7 +124,7 @@ warn_on_drift() {
       printf 'WARN version %s: lock %s, not found\n' "$name" "$expected"
       continue
     fi
-    probe_version "${words[@]}" 2>/dev/null
+    probe_version "${words[@]}"
     if [[ $PROBE_TIMED_OUT -eq 1 ]]; then
       printf 'WARN version %s: lock %s, no answer in %ss\n' "$name" "$expected" "$VERSION_TIMEOUT"
       continue
