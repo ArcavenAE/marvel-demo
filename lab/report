@@ -1,3 +1,186 @@
 #!/usr/bin/env bash
-# placeholder: the red commit has no report yet
-exit 1
+# lab/report <rung> --nonce <value> [--denials FILE] [--post --issue N]
+#
+# Writes the lab report for one rung in the fixed shape lab/verify-report
+# checks, and prints it. With --post it also posts the same bytes as a comment
+# on issue N of the repo this tree's own `origin` names, and no other repo.
+# There is no flag to name a repo.
+#
+# It is run as `lab/run exec lab/report ...`, so its digest is checked first.
+# It runs only pinned files (lab/run and lab/verify-report, both through
+# lab/run) and git and gh. It never runs, sources or reads for instructions
+# any other file under lab/: the denials file is read as text and nothing in
+# it is run.
+#
+# Before anything is printed, the free text (the verdict, the version lines and
+# the denials block) loses control characters, and `$HOME`, the user name and
+# the host name are replaced by `~`, `<user>` and `<host>`.
+#
+#   exit 0  the report was printed (and posted, with --post)
+#   exit 1  the origin or the shape check refused the post, or gh failed
+#   exit 2  usage
+
+set -euo pipefail
+
+ROOT=${LAB_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+
+usage() {
+  printf 'usage: lab/report <rung> --nonce <value> [--denials FILE] [--post --issue N]\n' >&2
+  exit 2
+}
+
+id=""
+nonce=""
+denials=""
+post=0
+issue=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --nonce) [[ $# -ge 2 ]] || usage; nonce=$2; shift 2 ;;
+    --denials) [[ $# -ge 2 ]] || usage; denials=$2; shift 2 ;;
+    --issue) [[ $# -ge 2 ]] || usage; issue=$2; shift 2 ;;
+    --post) post=1; shift ;;
+    -*) printf 'lab/report: unknown option %s\n' "$1" >&2; usage ;;
+    *)
+      [[ -z $id ]] || usage
+      id=$1
+      shift
+      ;;
+  esac
+done
+re='^[0-9]+[a-z]?$'
+[[ $id =~ $re ]] || usage
+re='^[A-Za-z0-9_-]{8,64}$'
+[[ $nonce =~ $re ]] || usage
+if [[ -n $denials && ! -f $denials ]]; then
+  printf 'lab/report: cannot read %s\n' "$denials" >&2
+  exit 2
+fi
+if [[ $post -eq 1 ]]; then
+  re='^[1-9][0-9]*$'
+  [[ $issue =~ $re ]] || usage
+elif [[ -n $issue ]]; then
+  usage
+fi
+
+# The values the free text is cleaned of. awk reads them from its environment,
+# so a backslash in one is not treated as an escape.
+export S_HOME=${HOME:-}
+[[ $S_HOME != / ]] || S_HOME=""
+S_HOME=${S_HOME%/}
+S_USER=$(id -un 2>/dev/null || true)
+S_HOST=$(hostname 2>/dev/null || true)
+S_SHORT=$(hostname -s 2>/dev/null || true)
+export S_USER S_HOST S_SHORT
+
+# clean: printable ASCII only, then the three substitutions.
+clean() {
+  LC_ALL=C tr -cd '\n -~' | LC_ALL=C awk '
+    function isw(c) { return c ~ /[A-Za-z0-9_]/ }
+    function isp(c) { return c ~ /[A-Za-z0-9_-]/ }
+    function rep(s, f, t, mode,   out, i, n, pre, post) {
+      if (f == "") return s
+      out = ""; n = length(f)
+      while ((i = index(s, f)) > 0) {
+        pre = (i > 1) ? substr(s, i - 1, 1) : substr(out, length(out), 1)
+        post = substr(s, i + n, 1)
+        if ((mode == 1 && ((pre != "" && isw(pre)) || (post != "" && isw(post)))) ||
+            (mode == 2 && post != "" && isp(post))) {
+          out = out substr(s, 1, i + n - 1); s = substr(s, i + n); continue
+        }
+        out = out substr(s, 1, i - 1) t; s = substr(s, i + n)
+      }
+      return out s
+    }
+    {
+      line = rep($0, ENVIRON["S_HOME"], "~", 2)
+      line = rep(line, ENVIRON["S_HOST"], "<host>", 1)
+      line = rep(line, ENVIRON["S_SHORT"], "<host>", 1)
+      line = rep(line, ENVIRON["S_USER"], "<user>", 1)
+      print line
+    }'
+}
+
+build_body() {
+  local verdict count kind path sum want state k name hex
+  printf 'LAB REPORT 1\n'
+  printf 'rung %s\n' "$id"
+  verdict=$("$ROOT/lab/run" check "$id" 2>&1 | grep '^RUNG ' || true)
+  count=0
+  [[ -z $verdict ]] || count=$(printf '%s\n' "$verdict" | wc -l | tr -d ' ')
+  if [[ $count -ne 1 ]]; then
+    verdict="RUNG $id FAIL H-noverdict: the harness printed $count RUNG lines"
+  fi
+  printf '%s\n' "$verdict" | clean
+  "$ROOT/lab/run" versions 2>/dev/null | clean || true
+  "$ROOT/lab/run" digests 2>/dev/null | while read -r kind path sum; do
+    want=""
+    if [[ -f $ROOT/lab.lock ]]; then
+      want=$(awk -v p="$path" '$1 == "digest" && $2 == p { print $3; exit }' "$ROOT/lab.lock")
+    fi
+    if [[ -z $want ]]; then state=unlocked
+    elif [[ $want == "$sum" ]]; then state=ok
+    else state=differs; fi
+    printf 'digest %s %s %s\n' "$path" "$sum" "$state"
+  done
+  count=0
+  if [[ -f $ROOT/lab.lock ]]; then
+    while read -r k name hex; do
+      [[ $k == workload ]] || continue
+      [[ -n $name && ${#hex} -eq 64 && $hex != *[!0-9a-f]* ]] || continue
+      printf 'workload %s %s\n' "$name" "$hex"
+      count=$((count + 1))
+    done <"$ROOT/lab.lock"
+  fi
+  [[ $count -gt 0 ]] || printf 'workload none pinned\n'
+  printf 'nonce %s\n' "$nonce"
+  printf 'denials and prompts\n'
+  if [[ -n $denials ]]; then
+    clean <"$denials" | awk '
+      { sub(/^- /, ""); if ($0 == "") next
+        n++
+        if (n <= 20) print "- " substr($0, 1, 200)
+        else if (n == 21) print "- (more lines omitted)" }
+      END { if (n == 0) print "none" }'
+  else
+    printf 'none\n'
+  fi
+}
+
+body=$(build_body)
+printf '%s\n' "$body"
+[[ $post -eq 1 ]] || exit 0
+
+# The origin guard: github.com only, and the repo comes from this tree's own
+# origin remote and nowhere else.
+url=$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)
+u=${url%/}
+u=${u%.git}
+name='[A-Za-z0-9][A-Za-z0-9._-]*'
+owner=""
+repo=""
+for form in "^https://github\\.com/($name)/($name)\$" "^git@github\\.com:($name)/($name)\$" "^ssh://git@github\\.com/($name)/($name)\$"; do
+  if [[ $u =~ $form ]]; then
+    owner=${BASH_REMATCH[1]}
+    repo=${BASH_REMATCH[2]}
+    break
+  fi
+done
+if [[ -z $owner ]]; then
+  printf 'lab/report: refusing to post: this tree has no github.com origin it can post to\n' >&2
+  exit 1
+fi
+
+# The shape check: the body must pass the pinned verifier (exit 0 or 3).
+vr=lab/verify-report
+vrc=0
+vout=$(printf '%s\n' "$body" | "$ROOT/lab/run" exec "$vr" - 2>&1) || vrc=$?
+if [[ $vrc -ne 0 && $vrc -ne 3 ]]; then
+  printf 'lab/report: refusing to post: the shape check failed (exit %s): %s\n' "$vrc" "$vout" >&2
+  exit 1
+fi
+
+if ! printf '%s\n' "$body" | env -u GH_REPO -u GH_HOST gh issue comment "$issue" --repo "github.com/$owner/$repo" --body-file - >/dev/null; then
+  printf 'lab/report: post failed\n' >&2
+  exit 1
+fi

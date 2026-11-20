@@ -6,7 +6,14 @@
 #     not fail the run.
 #
 #   digest <path> <sha256>
-#     The sha256 of a check script. A script whose digest differs, or that has
-#     no line here, FAILs and is not run. `lab/run digests` prints the lines.
+#     The sha256 of a check script, or of lab/report or lab/verify-report. A
+#     file whose digest differs, or that has no line here, FAILs and is not
+#     run. `lab/run digests` prints the lines.
 #
-# No checks or versions are pinned yet; they arrive with the rungs.
+#   workload <name> <sha256>
+#     The sha256 of a workload the lab runs; lab/report copies these lines
+#     into a report. Nothing is pinned yet.
+#
+# No versions are pinned yet; they arrive with the rungs.
+digest lab/report 85d5fb8f412d4191248ff331c55eec81e7b583a4e00dcf78235d4892429301cf
+digest lab/verify-report cd1bcf6e7be85c5423480f940eb6d44c501a1a85358c005a9e78ce56c63f312d

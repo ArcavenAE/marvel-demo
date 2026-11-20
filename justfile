@@ -1,7 +1,8 @@
 # The lab orc. The recipes live in the `lab` module (lab.just).
 #   just lab rung N      print the instructions for rung N
 #   just lab check N     run the check for rung N, or `all`
-#   just lab report N    post the report for rung N
+#   just lab report N NONCE [ISSUE [FILE]]
+#                        print the report for rung N; with ISSUE, post it there
 # `just --list --list-submodules` shows them.
 
 mod lab

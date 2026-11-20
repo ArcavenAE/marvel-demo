@@ -74,6 +74,11 @@ REQUIRED_DENY = [
     # sentinel is denied for Read as well as for running, since Read(./lab/**)
     # would otherwise allow reading it.
     "Edit(./lab/report)",
+    # The recipes that run the kit are `just` files, which just finds under
+    # these names. Edit(./lab/**) is allowed, so each name is denied here.
+    "Edit(./lab/mod.just)",
+    "Edit(./lab/justfile)",
+    "Edit(./lab/.justfile)",
     "Read(./lab/deny-probe)",
 ]
 

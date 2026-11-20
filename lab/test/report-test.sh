@@ -217,8 +217,8 @@ chmod +x "$FX/lab/helper"
 printf '%s\n' 'run lab/helper' >"$FX/lab/rung/04-demo.md"
 printf '%s\n' 'run lab/helper' >"$FX/lab/CLAUDE.md"
 trace=$FX/trace.txt
-(cd "$FX" && env -i HOME="$FX" TMPDIR="$WORK" PATH="$FX/bin:$PATH" BASH_XTRACEFD=9 PS4='+T ' \
-  bash -x "$FX/lab/run" exec lab/report 04 --nonce ABCDEFGH12345678 9>"$trace" >/dev/null 2>&1) || true
+(cd "$FX" && env -i HOME="$FX" TMPDIR="$WORK" PATH="$FX/bin:$PATH" SHELLOPTS=xtrace PS4='+T ' \
+  bash "$FX/lab/run" exec lab/report 04 --nonce ABCDEFGH12345678 >/dev/null 2>"$trace") || true
 if [[ -s $trace ]]; then ok "report: the trace was recorded"; else bad "report: the trace was recorded (empty)"; fi
 tr_text=$(cat "$trace" 2>/dev/null || true)
 for w in "lab/helper" "rung/" "CLAUDE.md" "marker" ".env"; do
@@ -569,6 +569,7 @@ rfix v1
 printf '%s\n' 'version stubtool 1.0.0 stubtool --version' >>"$FX/lab.lock"
 printf '%s\n' '#!/bin/sh' 'echo "stubtool 1.0.0"' >"$FX/bin/stubtool"
 chmod +x "$FX/bin/stubtool"
+printf '%s\n' 'a denied read' >"$FX/denials.txt"
 rep 04 --nonce "$NONCE" --denials "$FX/denials.txt"
 printf '%s\n' "$OUT" >"$FX/good.txt"
 verify "$FX/good.txt"

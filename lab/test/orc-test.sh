@@ -113,14 +113,13 @@ if command -v just >/dev/null 2>&1 && [[ -f $ROOT/justfile && -f $ROOT/lab.just 
   expect "rung prints its instructions" "$OUT" "Step one."
   expect "rung with instructions exits 0" "$RC" 0
 
-  lab report 3
-  expect "report with no script exits 1" "$RC" 1
-  expect "report with no script says so in one line" "$OUT" "lab: lab/report does not exist yet"
-  printf '%s\n' '#!/bin/sh' 'echo "report: $*"' >"$FX/lab/report"
-  chmod +x "$FX/lab/report"
-  lab report 3
-  expect "report passes its id to lab/report" "$OUT" "report: 3"
+  lab report 3 ABCDEFGH12345678
+  expect "report goes through lab/run exec with the id and nonce" "$OUT" "run: exec lab/report 3 --nonce ABCDEFGH12345678"
   expect "report exits 0" "$RC" 0
+  lab report 3 ABCDEFGH12345678 7 notes.txt
+  expect "report with an issue posts and passes the denials file" "$OUT" "run: exec lab/report 3 --nonce ABCDEFGH12345678 --denials notes.txt --post --issue 7"
+  lab report 3
+  expect "report without a nonce exits 1" "$RC" 1
 
   # An id is data, never shell text.
   lab check '1; touch "'"$FX"'/pwned"'
@@ -137,8 +136,8 @@ if command -v just >/dev/null 2>&1 && [[ -f $ROOT/justfile && -f $ROOT/lab.just 
   expect "rung 1 prints its file" "$OUT" "Rung one."
   lab rung 0a
   expect "rung 0a prints its file" "$OUT" "Rung zero-a."
-  bad_id() { # <name> <recipe> <id>
-    lab "$2" "$3"
+  bad_id() { # <name> <recipe> <id> [<nonce>]
+    lab "$2" "$3" ${4:+"$4"}
     expect "$1 is refused" "$RC" 1
     expect "$1 says so in one line" "$OUT" "lab: bad rung id"
     expect_not "$1 reads nothing outside the tree" "$OUT" "OUTSIDE-SECRET"
@@ -147,8 +146,8 @@ if command -v just >/dev/null 2>&1 && [[ -f $ROOT/justfile && -f $ROOT/lab.just 
   bad_id "rung 1/.. traversal" rung "1/../../../../outside/notes"
   bad_id "rung with an empty id" rung ""
   bad_id "rung with a space" rung "a b"
-  bad_id "report ../.. traversal" report "../../../outside/notes"
-  bad_id "report with an empty id" report ""
+  bad_id "report ../.. traversal" report "../../../outside/notes" ABCDEFGH12345678
+  bad_id "report with an empty id" report "" ABCDEFGH12345678
 else
   bad "the recipe fixture needs just, justfile and lab.just"
 fi

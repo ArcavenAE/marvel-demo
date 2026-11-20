@@ -1,3 +1,133 @@
 #!/usr/bin/env bash
-# placeholder: the red commit has no report yet
-exit 1
+# lab/verify-report FILE|- [--nonces FILE]
+#
+# Checks that a lab report has the fixed shape lab/report writes, and says
+# whether its nonce is the newest one issued. Needs only bash and awk. It reads
+# the report and the nonce list and nothing else.
+#
+#   exit 0  the shape is valid, and the nonce is fresh (or no list was given)
+#   exit 1  the shape is invalid: prints `INVALID line N: <why>`
+#   exit 2  usage, or a file that cannot be read
+#   exit 3  the shape is valid but the nonce is stale or was never issued
+#
+# The nonce list holds one issued nonce per line, oldest first. The last line
+# is the fresh one, an earlier line is stale, and one that is absent is unknown.
+
+set -euo pipefail
+
+usage() {
+  printf 'usage: lab/verify-report FILE|- [--nonces FILE]\n' >&2
+  exit 2
+}
+
+[[ $# -ge 1 ]] || usage
+file=$1
+shift
+nonces=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --nonces) [[ $# -ge 2 ]] || usage; nonces=$2; shift 2 ;;
+    *) usage ;;
+  esac
+done
+if [[ $file != - && ! -f $file ]]; then
+  printf 'verify-report: cannot read %s\n' "$file" >&2
+  exit 2
+fi
+if [[ -n $nonces && ! -f $nonces ]]; then
+  printf 'verify-report: cannot read %s\n' "$nonces" >&2
+  exit 2
+fi
+
+prog='
+function bad(m) { printf "INVALID line %d: %s\n", NR, m; failed = 1; exit 1 }
+function hex64(s) { return length(s) == 64 && s !~ /[^0-9a-f]/ }
+BEGIN { rank = 0; nw = 0; wnone = 0; nd = 0; dnone = 0 }
+{
+  if ($0 !~ /^[ -~]*$/) bad("a character that is not printable ASCII")
+  if (length($0) > 400) bad("line too long")
+}
+NR == 1 { if ($0 != "LAB REPORT 1") bad("expected the header LAB REPORT 1"); rank = 1; next }
+NR == 2 {
+  if ($0 !~ /^rung [0-9]+[a-z]?$/) bad("expected rung <id>")
+  id = substr($0, 6); rank = 2; next
+}
+NR == 3 {
+  pre = "RUNG " id " "
+  if ($0 == "RUNG " id " PASS") v = "PASS"
+  else if (index($0, pre "SKIP ") == 1 && length($0) > length(pre "SKIP ")) v = "SKIP"
+  else if (index($0, pre "FAIL ") == 1 && substr($0, length(pre "FAIL ") + 1) ~ /^[^ ]+: ./) v = "FAIL"
+  else bad("expected the verdict line for rung " id)
+  rank = 3; next
+}
+rank < 8 {
+  n = split($0, a, " ")
+  if ($0 ~ /^version [^ ]+ [^ ]+ ./) r = 4
+  else if (n == 4 && a[1] == "digest" && hex64(a[3]) && (a[4] == "ok" || a[4] == "differs" || a[4] == "unlocked")) r = 5
+  else if ($0 == "workload none pinned") { if (nw > 0) bad("workload none pinned beside a workload"); wnone = 1; r = 6 }
+  else if (n == 3 && a[1] == "workload" && hex64(a[3])) { if (wnone) bad("a workload beside workload none pinned"); nw++; r = 6 }
+  else if (n == 2 && a[1] == "nonce" && length(a[2]) >= 8 && length(a[2]) <= 64 && a[2] !~ /[^A-Za-z0-9_-]/) {
+    if (rank == 7) bad("a second nonce line")
+    if (nw == 0 && !wnone) bad("the nonce comes before any workload line")
+    nonce = a[2]; r = 7
+  }
+  else if ($0 == "denials and prompts") {
+    if (rank != 7) bad("the denials header comes before the nonce")
+    r = 8
+  }
+  else bad("a line in no known shape")
+  if (r < rank) bad("a line out of order")
+  rank = r; next
+}
+{
+  if (dnone) bad("a line after none")
+  if ($0 == "none") { if (nd > 0) bad("none beside denial lines"); dnone = 1; next }
+  if ($0 !~ /^- ./) bad("a denials line must start with a dash and a space")
+  nd++
+}
+END {
+  if (failed) exit 1
+  if (NR == 0) bad("empty report")
+  if (rank < 8) bad("the report ends before the denials section")
+  if (nd == 0 && !dnone) bad("nothing after the denials header")
+  printf "OK %s %s %s\n", id, v, nonce
+}
+'
+rc=0
+if [[ $file == - ]]; then
+  res=$(LC_ALL=C awk "$prog") || rc=$?
+else
+  res=$(LC_ALL=C awk "$prog" "$file") || rc=$?
+fi
+if [[ $rc -ne 0 ]]; then
+  printf '%s\n' "$res"
+  exit 1
+fi
+set -f
+set -- $res
+set +f
+id=$2
+verdict=$3
+nonce=$4
+
+state=unchecked
+if [[ -n $nonces ]]; then
+  last=""
+  state=unknown
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ -n $line ]] || continue
+    if [[ $line == "$nonce" ]]; then state=stale; fi
+    last=$line
+  done <"$nonces"
+  if [[ $state == stale && $last == "$nonce" ]]; then state=fresh; fi
+fi
+
+case $state in
+  fresh | unchecked)
+    printf 'report OK rung %s %s, nonce %s\n' "$id" "$verdict" "$state"
+    ;;
+  *)
+    printf 'report valid, rung %s %s, nonce %s\n' "$id" "$verdict" "$state"
+    exit 3
+    ;;
+esac
