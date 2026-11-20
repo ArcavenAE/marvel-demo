@@ -1,0 +1,19 @@
+# Keeps a macOS host awake while the lab runs.
+# caffeinate -i holds off idle sleep; -s holds off system sleep on AC power.
+# It does not stop Maintenance Sleep and does not hold a closed lid on battery.
+
+[workspace]
+name = "host"
+
+[[team]]
+name = "keepawake"
+
+  [[team.role]]
+  name = "caffeinate"
+  replicas = 1
+  restart_policy = "always"
+
+    [team.role.runtime]
+    image = "shell"
+    command = "/usr/bin/caffeinate"
+    args = ["-i", "-s"]
