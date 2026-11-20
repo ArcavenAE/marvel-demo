@@ -1,6 +1,6 @@
 # Lab workload relay, part (i): two shell seats that exchange a message on the bus.
 # `ping` publishes "ping <n>" on lab.relay.ping every 5 seconds and logs what it
-# hears on lab.relay.pong to $HOME/.marvel/lab/relay/<session>.log. `pong` listens
+# hears on lab.relay.pong to ${LAB_STATE:-$HOME/lab-run}/relay/<session>.log. `pong` listens
 # on lab.relay.ping and answers "pong <n>" on lab.relay.pong. Both use the nats
 # command line tool against RELAY_URL (default nats://127.0.0.1:4222) with no
 # context and no credentials. See README.md.
@@ -35,7 +35,7 @@ done
     image = "shell"
     command = "sh"
     args = ["-c", '''u="${RELAY_URL:-nats://127.0.0.1:4222}"
-d="${RELAY_DIR:-$HOME/.marvel/lab/relay}"
+d="${RELAY_DIR:-${LAB_STATE:-$HOME/lab-run}/relay}"
 mkdir -p "$d"
 nats --no-context --server "$u" sub --raw lab.relay.pong >> "$d/$MARVEL_SESSION.log" &
 p=$!

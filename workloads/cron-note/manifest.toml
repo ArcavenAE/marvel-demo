@@ -1,6 +1,6 @@
 # Lab workload cron-note.
 # One seat that appends "<session> slot=<n> <UTC time>" every 2 minutes to
-# $HOME/.marvel/lab/cron-note/<session>.log. marvel's cadence below opens a slot
+# ${LAB_STATE:-$HOME/lab-run}/cron-note/<session>.log. marvel's cadence below opens a slot
 # every 2 minutes too, but at this build it only records the slot (see
 # `marvel events`); the loop does the appending. See README.md.
 
@@ -18,7 +18,7 @@ name = "lab"
     [team.role.runtime]
     image = "shell"
     command = "sh"
-    args = ["-c", '''d="${CRON_NOTE_DIR:-$HOME/.marvel/lab/cron-note}"
+    args = ["-c", '''d="${CRON_NOTE_DIR:-${LAB_STATE:-$HOME/lab-run}/cron-note}"
 mkdir -p "$d"
 n=0
 while true; do

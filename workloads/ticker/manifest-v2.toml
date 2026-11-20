@@ -1,6 +1,6 @@
 # Lab workload ticker, manifest v2: the same loop, tagged v2.
 # One seat that writes "<session> gen=<generation> count=<n>" every 5 seconds to
-# $HOME/.marvel/lab/ticker/<session>.log, and keeps its counter in a handoff
+# ${LAB_STATE:-$HOME/lab-run}/ticker/<session>.log, and keeps its counter in a handoff
 # file so a successor continues the count. See README.md.
 
 [workspace]
@@ -17,7 +17,7 @@ name = "lab"
     [team.role.runtime]
     image = "shell"
     command = "sh"
-    args = ["-c", '''d="${TICKER_DIR:-$HOME/.marvel/lab/ticker}"
+    args = ["-c", '''d="${TICKER_DIR:-${LAB_STATE:-$HOME/lab-run}/ticker}"
 mkdir -p "$d"
 g="${MARVEL_SESSION##*-g}"; g="${g%%-*}"
 n=0
@@ -37,6 +37,6 @@ done
     TICKER_VERSION = "v2"
 
     [team.role.shift]
-    handoff = "~/.marvel/lab/ticker/{session}.handoff.md"
+    handoff = "~/lab-run/ticker/{session}.handoff.md"
     handoff_marker = "END HANDOFF"
     handoff_window = "5m"

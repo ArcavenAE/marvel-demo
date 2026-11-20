@@ -11,6 +11,9 @@ a README with the exact lines a passing run prints and how those lines were reco
 
 The files here name no real person, host or path.
 
+Each workload keeps its files under `${LAB_STATE:-$HOME/lab-run}/<workload>/`, a lab-owned
+directory, so teardown has one place to look and nothing is written into marvel's own state.
+
 ## Lab author identity
 
 Git history built from these directories into the lab kit uses one fake author, so no

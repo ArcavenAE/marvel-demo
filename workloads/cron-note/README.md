@@ -3,7 +3,7 @@
 A shell loop that appends one line every 2 minutes. The lab uses it to show a
 scheduled role.
 
-Each slot adds one line to `$HOME/.marvel/lab/cron-note/<session>.log`:
+Each slot adds one line to `${LAB_STATE:-$HOME/lab-run}/cron-note/<session>.log`:
 
     <session> slot=<n> <UTC time>
 

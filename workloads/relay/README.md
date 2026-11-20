@@ -5,7 +5,7 @@ workload: shell seats and the `nats` command line tool only.
 
 - `pong` listens on `lab.relay.ping` and answers `pong <n>` on `lab.relay.pong`.
 - `ping` publishes `ping <n>` on `lab.relay.ping` every 5 seconds and appends what it
-  hears on `lab.relay.pong` to `$HOME/.marvel/lab/relay/<session>.log`.
+  hears on `lab.relay.pong` to `${LAB_STATE:-$HOME/lab-run}/relay/<session>.log`.
 
 Both talk to `RELAY_URL`, which defaults to `nats://127.0.0.1:4222`, with `--no-context`
 and no credentials file. They need `nats` on `PATH`.

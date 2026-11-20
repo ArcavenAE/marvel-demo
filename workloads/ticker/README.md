@@ -2,12 +2,13 @@
 
 A shell loop with predictable output. It is the first workload the lab ladder runs.
 
-Each tick it adds one line to `$HOME/.marvel/lab/ticker/<session>.log`:
+Each tick it adds one line to `${LAB_STATE:-$HOME/lab-run}/ticker/<session>.log`:
 
     <session> gen=<generation> count=<n> v=<version>
 
-It also rewrites `<session>.handoff.md` with its counter and the marker line
-`END HANDOFF`. A successor started with `MARVEL_PREDECESSOR` set reads the
+It also rewrites `<session>.handoff.md` in the same directory with its counter and the marker line
+`END HANDOFF`. The manifest's `shift.handoff` path is `~/lab-run/ticker/{session}.handoff.md`, so
+it matches only while `LAB_STATE` is unset. A successor started with `MARVEL_PREDECESSOR` set reads the
 predecessor's handoff file and continues the count.
 
 Files:
