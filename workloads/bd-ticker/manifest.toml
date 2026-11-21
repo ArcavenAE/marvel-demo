@@ -1,0 +1,45 @@
+# Lab workload bd-ticker (rung 8): one shell seat that files one bd issue and then ticks.
+# On its first tick it asks bd for issues carrying the label lab-ticker-note. If one
+# already has this session's title, the seat files nothing, so a restart on a fresh home
+# does not file a second issue. Otherwise it files one issue titled
+# "lab note from ticker seat <session>" with the labels lab and lab-ticker-note, and logs
+# "<session> filed <id>". It never closes or edits an issue: closing is the human's step
+# in rung 8. Without bd on PATH it logs "bd not found" and keeps ticking. It writes only
+# to ${LAB_STATE:-$HOME/lab-run}/bd-ticker/<session>.log. See README.md.
+
+[workspace]
+name = "lab"
+
+[[team]]
+name = "bd-ticker"
+
+  [[team.role]]
+  name = "ticker"
+  replicas = 1
+  restart_policy = "always"
+
+    [team.role.runtime]
+    image = "shell"
+    command = "sh"
+    args = ["-c", '''d="${BD_TICKER_DIR:-${LAB_STATE:-$HOME/lab-run}/bd-ticker}"
+mkdir -p "$d"
+f="$d/$MARVEL_SESSION.log"
+title="lab note from ticker seat $MARVEL_SESSION"
+n=0
+while true; do
+  n=$((n + 1))
+  if [ "$n" -eq 1 ]; then
+    if ! command -v bd > /dev/null 2>&1; then
+      echo "$MARVEL_SESSION bd not found" >> "$f"
+    elif bd list --all --label lab-ticker-note --json 2> /dev/null | grep -qF "\"$title\""; then
+      echo "$MARVEL_SESSION found its issue, filed nothing" >> "$f"
+    else
+      id=$(bd create "$title" --type task --labels lab,lab-ticker-note --silent 2> /dev/null)
+      echo "$MARVEL_SESSION filed $id" >> "$f"
+    fi
+  fi
+  echo "$MARVEL_SESSION tick $n" >> "$f"
+  if [ -n "${BD_TICKER_MAX:-}" ] && [ "$n" -ge "$BD_TICKER_MAX" ]; then break; fi
+  sleep "${BD_TICKER_INTERVAL:-5}"
+done
+''']

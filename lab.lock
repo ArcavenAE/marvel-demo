@@ -20,6 +20,15 @@
 #     into a report. Nothing is pinned yet.
 #
 # No versions are pinned yet; they arrive with the rungs.
+digest lab/check/01-first-team.sh a992e9f83fa7f68dac1ed2fff9a2db10ab62b9d93071664ae749224e0885d4f4
+digest lab/check/02-attach.sh fed387286b8c3657b0d226a77c50c84e2f4d2d08c0b850aa5f221427fddc0404
+digest lab/check/03-scale.sh abb5a75f825aa0ffad97b8a220d112ef0b222b1224da0b45736ed6c801ca65a0
+digest lab/check/04-shift.sh 8338bca587776a22e0d0911b12389b38dd9fdb5e7fcd48ad45dd51e58b58d201
+digest lab/check/05-inject.sh 80550a9215a1174bd282f1fb1bdae17a45f54338d1fc378608a82708928a7483
+digest lab/check/06-bus.sh 40c0ca14a5ac555287b603e3ae55224c8569e50557245c1fee44edd510927642
+digest lab/check/07-cadence.sh eaa4bdf7cdef6d9fc520bca279641c722bf57955535bdfe142cb2da155ecfff1
+digest lab/check/08-bd.sh 9028fcd08249f541a9a9322ab20c4fb837e1b74448999da94747297b35b219a5
+digest lab/check/09-upgrade.sh 3380557735bf3098f07f050e95bc643926c67afe17fcd8a71aabed53cf9a3595
 digest lab/check/0a-marvel.sh 096065b2699bbdeec2418f4ad7800426ec7d60be82ea9dac56d8e51f530fee0e
 digest lab/check/0b-denial.sh a3a6d06e55d86a17e4bbae973c3cbeac5bde6cfd0451ea2eec5389334939a80a
 digest lab/check/0c-keepawake.sh b7c8a9073e333bb8d3a72b11459cc93948a0985cc807cedd02cba65ab8406c34

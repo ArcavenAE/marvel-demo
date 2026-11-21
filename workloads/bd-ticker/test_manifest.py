@@ -161,7 +161,7 @@ class Behavior(unittest.TestCase):
     def test_it_never_closes_or_edits_what_it_filed(self):
         s = Seat(self, ticks=3)
         verbs = {c.split()[0] for c in s.bd_calls() if c.split()}
-        self.assertEqual(verbs, {"create"}, "the human closes the issue, so the seat uses only create: %r" % sorted(verbs))
+        self.assertTrue(verbs <= {"create", "list"}, "the human closes the issue, so the seat only creates and lists: %r" % sorted(verbs))
 
     def test_it_records_the_filing_in_its_own_log(self):
         s = Seat(self)
