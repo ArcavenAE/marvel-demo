@@ -108,6 +108,11 @@ mv "$FX/bin/lsof" "$FX/lsof.away"
 lab
 verdict "C-td-1 FAILs when lsof is not there to look" "RUNG 12 FAIL C-td-1:" 1
 mv "$FX/lsof.away" "$FX/bin/lsof"
+put lsof.rc 2
+lab
+verdict "C-td-1 FAILs when lsof errors out instead of answering" "RUNG 12 FAIL C-td-1:" 1
+named "C-td-1 says lsof failed" "lsof failed"
+mv "$ST/lsof.rc" "$ST/lsof.rc.away"
 
 # --- C-td-2: the lab key is gone from authorized_keys ----------------------------
 cat "$FX/key-lab.pub" >>"$HM/.marvel/authorized_keys"
@@ -249,6 +254,12 @@ put config.out ""
 put config.rc 0
 lab
 verdict "C-td-5 FAILs when marvel config list prints nothing" "RUNG 12 FAIL C-td-5:" 1
+put config.out "     NAME     ADDRESS               IDENTITY
+*    local    /scratch/marvel.sock  (default)  -
+     local2   mrvl://friend-mac     -"
+lab
+verdict "C-td-5 FAILs on a cluster whose name only starts with local" "RUNG 12 FAIL C-td-5:" 1
+named "C-td-5 names the cluster local2" "local2"
 put config.out "     NAME   ADDRESS      IDENTITY
 *    local  /scratch/marvel.sock  (default)  -"
 LABPATH=/usr/bin:/bin lab
@@ -283,6 +294,8 @@ else
   [[ -n $(section Tools) ]] && ok "rung 12 has a Tools section" || bad "rung 12 has no Tools section"
   [[ -n $(section "Expected prompts") ]] && ok "rung 12 has an Expected prompts section" || bad "rung 12 has no Expected prompts section"
   [[ -n $(section "Left in place") ]] && ok "rung 12 has a Left in place section" || bad "rung 12 has no Left in place section"
+  case $body in *"shows the first check still failing"*) ok "rung 12 says the posted report shows the first check still failing" ;; *) bad "rung 12 does not say the posted report shows the first check still failing" ;; esac
+  case $body in *"may list what is still left"*) bad "rung 12 still says the report may list what is still left" ;; *) ok "rung 12 no longer says the report may list what is left" ;; esac
   for s in "lab report 12" "collaborator" "lab-keys" "lsof" "teardown-start" "gh api" "lab/state/collaborators" "lab/state/invitations" "marvel stop --teardown" "marvel keys revoke" "marvel config remove-cluster" "just lab check 12"; do
     case $body in *"$s"*) ok "rung 12 names $s" ;; *) bad "rung 12 does not name $s" ;; esac
   done

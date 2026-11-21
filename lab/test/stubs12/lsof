@@ -1,12 +1,13 @@
 #!/bin/sh
 # Test stub for lsof, rung 12. `lsof -nP -iTCP:<port> -sTCP:LISTEN -t` prints the
-# pids in $LABT_STATE/lsof.<port> and exits 1 when there are none, like the real one.
+# pids in $LABT_STATE/lsof.<port> and exits 1 when there are none, like the real one. With $LABT_STATE/lsof.rc set it exits with that status instead, for an lsof that errors.
 S=$LABT_STATE
 echo "lsof $*" >>"$S/calls"
 port=""
 for a in "$@"; do
   case $a in -iTCP:*) port=${a#-iTCP:} ;; esac
 done
+if [ -f "$S/lsof.rc" ]; then cat "$S/lsof.out" 2>/dev/null; exit "$(cat "$S/lsof.rc")"; fi
 f=$S/lsof.$port
 if [ -s "$f" ]; then cat "$f"; exit 0; fi
 exit 1
