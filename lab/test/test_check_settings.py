@@ -796,7 +796,7 @@ def test_round8_denies():
                "deny is %r" % shipped.get("deny"))
         expect_fail("round 8: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
                     mutate=lambda d, r=rule: allow(d).append(r))
-    record("round 8: the shipped deny list has 23 entries", len(shipped.get("deny", [])) == 23,
+    record("round 8: the shipped deny list has 26 entries", len(shipped.get("deny", [])) == 26,
            "count %r" % len(shipped.get("deny", [])))
     # Removing only one of the two leaves C-set-3 FAIL naming the other.
     for rule in ("Edit(./lab/report)", "Read(./lab/deny-probe)"):
@@ -822,7 +822,7 @@ def test_justfile_denies():
     them. Each is a required deny (the removal mutants run in test_cset3), is
     in the shipped file, and may not also be an allow."""
     shipped = (load_settings() or {}).get("permissions", {})
-    for rule in ("Edit(./lab/mod.just)", "Edit(./lab/justfile)", "Edit(./lab/.justfile)"):
+    for rule in ("Edit(./lab/mod.just)", "Edit(./lab/justfile)", "Edit(./lab/.justfile)", "Edit(./lab/Justfile)"):
         record("justfile denies: the shipped deny list holds %s" % rule, rule in shipped.get("deny", []),
                "deny is %r" % shipped.get("deny"))
         expect_fail("justfile denies: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
@@ -834,7 +834,7 @@ def test_justfile_denies():
         record("justfile denies: without %s the C-set-3 line FAILs and names it" % rule,
                rc == 1 and bool(line) and "FAIL" in line[0] and rule in line[0], "line %r" % line)
     # Look-alikes stay allowed.
-    for rule in ("Edit(./lab/mod.justx)", "Edit(./lab/justfiles)", "Read(./lab/justfile)", "Read(./lab/mod.just)"):
+    for rule in ("Edit(./lab/mod.justx)", "Edit(./lab/justfiles)", "Read(./lab/justfile)", "Read(./lab/mod.just)", "Read(./lab/Justfile)", "Edit(./lab/Justfiles)"):
         expect_pass("justfile denies: control, %s as an allow passes C-set-2" % rule, "C-set-2",
                     mutate=lambda d, r=rule: allow(d).append(r))
 
@@ -848,7 +848,8 @@ def test_roots_of_trust():
     file, may not also be an allow, and its removal makes C-set-3 FAIL."""
     shipped = (load_settings() or {}).get("permissions", {})
     for rule in ("Edit(./lab/run)", "Edit(./lab.lock)", "Edit(./lab/check-settings)",
-                 "Edit(./lab.just)", "Edit(./justfile)", "Edit(./.claude/settings.json)"):
+                 "Edit(./lab.just)", "Edit(./justfile)", "Edit(./.claude/settings.json)",
+                 "Edit(./.git/config)", "Edit(./.claude/settings.local.json)"):
         record("roots: the shipped deny list holds %s" % rule, rule in shipped.get("deny", []),
                "deny is %r" % shipped.get("deny"))
         expect_fail("roots: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
@@ -860,7 +861,8 @@ def test_roots_of_trust():
         record("roots: without %s the C-set-3 line FAILs and names it" % rule,
                rc == 1 and bool(line) and "FAIL" in line[0] and rule in line[0], "line %r" % line)
     for rule in ("Edit(./lab.justx)", "Edit(./justfiles)", "Read(./lab.just)", "Read(./justfile)",
-                 "Read(./.claude/settings.json)"):
+                 "Read(./.claude/settings.json)", "Read(./.git/config)", "Edit(./.git/config.bak)",
+                 "Read(./.claude/settings.local.json)", "Edit(./.claude/settings.local.json.bak)"):
         expect_pass("roots: control, %s as an allow passes C-set-2" % rule, "C-set-2",
                     mutate=lambda d, r=rule: allow(d).append(r))
 
