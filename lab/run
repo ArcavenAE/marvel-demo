@@ -3,8 +3,14 @@
 #
 #   lab/run check <id>    run one check and print its verdict
 #   lab/run check all     run every check in order, stop at the first FAIL
-#   lab/run digests       print a `digest` line for every check script, ready
-#                         to paste into lab.lock
+#   lab/run digests       print a `digest` line for every check script and for
+#                         lab/report and lab/verify-report, ready to paste into
+#                         lab.lock
+#   lab/run exec <path> [args...]
+#                         run a pinned file under lab/ with bash, after the
+#                         same digest check a check script gets
+#   lab/run versions      print one line per `version` pin: what the lock
+#                         expects and what the tool says now
 #
 # A check is a script at lab/check/<id>-<name>.sh. It prints exactly one line
 # that starts with `RUNG `, in one of three shapes, and exits to match:
@@ -31,7 +37,7 @@ LOCK=$LAB_ROOT/lab.lock
 CHECK_DIR=$LAB_ROOT/lab/check
 
 usage() {
-  printf 'usage: lab/run check <id|all> | lab/run digests\n' >&2
+  printf 'usage: lab/run check <id|all> | lab/run digests | lab/run exec <path> [args...] | lab/run versions\n' >&2
   exit 2
 }
 
@@ -242,10 +248,88 @@ cmd_digests() {
     [[ -e $f ]] || continue
     printf 'digest lab/check/%s %s\n' "${f##*/}" "$(sha256_of "$f")"
   done
+  for f in lab/report lab/verify-report; do
+    [[ -f $LAB_ROOT/$f ]] || continue
+    printf 'digest %s %s\n' "$f" "$(sha256_of "$LAB_ROOT/$f")"
+  done
+}
+
+# lab/run exec <path> [args...]: run one pinned file. The path is `lab/` and
+# then plain names (letters, digits, dot, dash, underscore) joined by `/`, with
+# no `.` or `..` part, so it cannot reach outside lab/. A symlink anywhere on
+# the path is refused. The file must have a digest line in lab.lock and match
+# it. It is then run with bash from the lab root, with LAB_ROOT exported, its
+# arguments passed through unsplit, and its exit status returned.
+cmd_exec() {
+  [[ $# -ge 1 ]] || usage
+  local rel=$1 part acc="" want got rc=0
+  shift
+  local re='^lab(/[A-Za-z0-9_-][A-Za-z0-9._-]*)+$'
+  if [[ ! $rel =~ $re ]]; then
+    printf 'exec: refusing the path [%s]: it must be lab/ then plain names\n' "$rel"
+    exit 1
+  fi
+  for part in ${rel//\// }; do
+    [[ $part != . && $part != .. ]] || { printf 'exec: refusing the path [%s]: no . or .. part\n' "$rel"; exit 1; }
+  done
+  acc=$LAB_ROOT
+  for part in ${rel//\// }; do
+    acc=$acc/$part
+    if [[ -L $acc ]]; then
+      printf 'exec FAIL H-link: %s is a symlink\n' "$rel"
+      exit 1
+    fi
+  done
+  if [[ ! -f $LOCK ]]; then
+    printf 'exec FAIL H-nolock: lab.lock not found\n'
+    exit 1
+  fi
+  want=$(lock_digest "$rel")
+  if [[ -z $want ]]; then
+    printf 'exec FAIL H-nodigest: %s has no digest line in lab.lock\n' "$rel"
+    exit 1
+  fi
+  if [[ ! -f $LAB_ROOT/$rel ]]; then
+    printf 'exec FAIL H-missing: %s is pinned but not there\n' "$rel"
+    exit 1
+  fi
+  got=$(sha256_of "$LAB_ROOT/$rel")
+  if [[ $got != "$want" ]]; then
+    printf 'exec FAIL H-digest: %s is %s, lab.lock has %s\n' "$rel" "$got" "$want"
+    exit 1
+  fi
+  (cd "$LAB_ROOT" && LAB_ROOT=$LAB_ROOT && export LAB_ROOT && exec bash "$rel" "$@") || rc=$?
+  exit "$rc"
+}
+
+# lab/run versions: `version <name> <expected> <found>`, found being the tool's
+# first output line, `missing`, or `no answer`. Never fails.
+cmd_versions() {
+  [[ -f $LOCK ]] || return 0
+  local kind name expected cmd
+  local -a words
+  while read -r kind name expected cmd; do
+    [[ $kind == version ]] || continue
+    set -f
+    words=($cmd)
+    set +f
+    if [[ ${#words[@]} -eq 0 ]] || ! command -v "${words[0]}" >/dev/null 2>&1; then
+      printf 'version %s %s missing\n' "$name" "$expected"
+      continue
+    fi
+    probe_version "${words[@]}"
+    if [[ $PROBE_TIMED_OUT -eq 1 ]]; then
+      printf 'version %s %s no answer\n' "$name" "$expected"
+      continue
+    fi
+    printf 'version %s %s %s\n' "$name" "$expected" "${PROBE_OUT:-no answer}"
+  done <"$LOCK"
 }
 
 case ${1:-} in
   check) shift; cmd_check "$@" ;;
   digests) cmd_digests ;;
+  exec) shift; cmd_exec "$@" ;;
+  versions) cmd_versions ;;
   *) usage ;;
 esac

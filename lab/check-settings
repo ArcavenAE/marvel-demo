@@ -74,6 +74,16 @@ REQUIRED_DENY = [
     # sentinel is denied for Read as well as for running, since Read(./lab/**)
     # would otherwise allow reading it.
     "Edit(./lab/report)",
+    # The recipes that run the kit are `just` files, which just finds under
+    # these names. Edit(./lab/**) is allowed, so each name is denied here.
+    "Edit(./lab/mod.just)",
+    "Edit(./lab/justfile)",
+    "Edit(./lab/.justfile)",
+    # Roots of trust outside the Edit(./lab/**) allow: the recipes, the root
+    # justfile and these settings. Without a deny each would prompt, not refuse.
+    "Edit(./lab.just)",
+    "Edit(./justfile)",
+    "Edit(./.claude/settings.json)",
     "Read(./lab/deny-probe)",
 ]
 

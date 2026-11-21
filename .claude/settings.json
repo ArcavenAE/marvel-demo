@@ -30,6 +30,12 @@
       "Edit(./lab.lock)",
       "Edit(./lab/HARNESS.md)",
       "Edit(./lab/report)",
+      "Edit(./lab/mod.just)",
+      "Edit(./lab/justfile)",
+      "Edit(./lab/.justfile)",
+      "Edit(./lab.just)",
+      "Edit(./justfile)",
+      "Edit(./.claude/settings.json)",
       "Read(./lab/deny-probe)"
     ]
   }
