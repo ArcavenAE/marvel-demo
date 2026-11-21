@@ -10,7 +10,7 @@ a README with the exact lines a passing run prints and how those lines were reco
 | `relay/` | two shell seats that exchange a message on the bus with the `nats` command line tool |
 | `relay-claude/` | optional rung 10: two Claude seats that exchange one director message; spends model quota |
 
-Each workload is its own marvel team (`ticker`, `cron-note`, `relay`) in the workspace `lab`,
+Each workload is its own marvel team (`ticker`, `cron-note`, `relay`, `relay-claude`) in the workspace `lab`,
 because applying a manifest replaces the roles of the team it names: sharing one team would
 retire the other workloads' seats. A session is named `<team>-<role>-g<generation>-<n>`.
 
