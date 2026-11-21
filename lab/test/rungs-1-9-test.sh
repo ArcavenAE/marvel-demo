@@ -349,6 +349,12 @@ put version.out "marvel 1.2.4 (alpha)
 daemon  1.2.4 (alpha) commit bbbb222 pid 900 started 2026-11-21T04:10:00Z"
 lab 09
 verdict "09 passes when the daemon re-exec'd in place and the seats stayed the same" "RUNG 09 PASS" 0
+good=$(cat "$ST/sessions.json")
+put sessions.json "warning: the running daemon is a different build than this client
+$good"
+lab 09
+verdict "09 passes when a client-mismatch warning line precedes the sessions JSON" "RUNG 09 PASS" 0
+put sessions.json "$good"
 sessions "$(seat $TICKER0 ticker running 4999 %1 1)"
 lab 09
 verdict "09 FAILs when a seat's process changed across the re-exec" "RUNG 09 FAIL C-r9:" 1
