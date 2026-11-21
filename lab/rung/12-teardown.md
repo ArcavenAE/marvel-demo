@@ -20,7 +20,7 @@ You, in this order:
 ## Expected prompts
 
 - You run every command here yourself, so the agent's permission prompts do not apply. Where a command asks you to confirm, answer yes.
-- If you ask the agent to run `just lab check 12` or `just lab report 12`, they are reads and a post to one issue; the stop, revoke and remove-cluster commands are not on its allow list, so it may ask you first.
+- `marvel stop --teardown` ends every seat, including the one the agent runs in, so you, not the agent, run `just lab report 12` and `just lab check 12` after the stop, from your own terminal.
 
 ## Left in place
 
