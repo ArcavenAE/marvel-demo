@@ -13,6 +13,8 @@ the quota to spare.
 A session is named `<team>-<role>-g<generation>-<n>`, so the answerer's session is
 `relay-claude-answerer-g1-0` and that is its director address in the team `relay-claude`.
 
+To run the rung again, first delete the team with `marvel delete team lab/relay-claude`. That removes the old seats and their records, so the new answerer is `relay-claude-answerer-g1-0` again, the name the asker sends to. Applying the manifest again without it does not start the rung over.
+
 ## What you need
 
 - the `claude` command, logged in;
