@@ -2,14 +2,14 @@
 # Rung 12: teardown, walk it all back
 # Run by lab/run, from the lab root, after it has checked this file's digest.
 # Prints one RUNG line and exits 0 (PASS) or 1 (FAIL). It never acts: every call
-# is a read (lsof, marvel get and config list, ssh-keygen -l, gh api GETs). The
-# one network read is the collaborator listing, which goes to the repo this
-# tree's own origin names and to no other. No here-document and no here-string:
-# bash 3.2 writes those to /tmp, which a locked-down run denies.
+# is a read (lsof, marvel get and config list, ssh-keygen -l, git remote, and
+# the listing files you saved). It calls no gh and dials nothing past this
+# machine. No here-document and no here-string: bash 3.2 writes those to /tmp,
+# which a locked-down run denies.
 #
 #   C-td-1  no process listens on a lab port (LAB_PORTS, default 4222, the bus)
 #   C-td-2  no key recorded in lab/state/lab-keys is in ~/.marvel/authorized_keys
-#   C-td-3  the repo has no collaborator but you, and no pending invitation
+#   C-td-3  your saved listings show no collaborator but the owner and no invitation
 #   C-td-4  no session is left in the lab workspace (a stopped daemon counts)
 #   C-td-5  marvel config lists no cluster but local
 
@@ -106,43 +106,44 @@ if [[ -s $AK ]]; then
   done
 fi
 
-# C-td-3: no collaborator but you, and no pending invitation, on the repo this
-# tree's origin names. Reads only; the listing goes to github.com and nowhere else.
+# C-td-3: the repository has no collaborator but its owner, and no pending
+# invitation. The check calls no gh and dials nothing: it reads two listings you
+# saved with gh after the teardown started (lab/state/teardown-start is the
+# marker), and the owner's login from this tree's origin.
+MARK=lab/state/teardown-start
+COLLAB=lab/state/collaborators
+INVITE=lab/state/invitations
 command -v git >/dev/null 2>&1 || fail C-td-3 "git is not on PATH"
-command -v gh >/dev/null 2>&1 || fail C-td-3 "gh is not on PATH"
 url=$(git remote get-url origin 2>/dev/null || true)
 u=${url%/}
 u=${u%.git}
 name='[A-Za-z0-9][A-Za-z0-9._-]*'
 owner=""
-repo=""
 for form in "^https://github\\.com/($name)/($name)\$" "^git@github\\.com:($name)/($name)\$" "^ssh://git@github\\.com/($name)/($name)\$"; do
   if [[ $u =~ $form ]]; then
     owner=${BASH_REMATCH[1]}
-    repo=${BASH_REMATCH[2]}
     break
   fi
 done
-[[ -n $owner ]] || fail C-td-3 "this tree has no github.com origin to list collaborators on"
-bounded "$WAIT" gh api user --jq .login
-[[ $B_RC -eq 0 ]] || fail C-td-3 "gh could not read your login (exit $B_RC)"
-me=$(printf '%s' "$B_OUT" | head -1)
-[[ -n $me ]] || fail C-td-3 "gh printed no login"
-bounded "$WAIT" gh api "repos/$owner/$repo/collaborators" --paginate --jq '.[].login'
-[[ $B_RC -eq 0 ]] || fail C-td-3 "the collaborator listing failed (exit $B_RC)"
-[[ -n ${B_OUT//[[:space:]]/} ]] || fail C-td-3 "the collaborator listing is empty: it should hold at least you"
-extra=""
+[[ -n $owner ]] || fail C-td-3 "this tree has no github.com origin, so the owner's login is unknown"
+[[ -f $MARK ]] || fail C-td-3 "$MARK is missing: create it when you start the teardown, before you post the report"
+[[ -f $COLLAB ]] || fail C-td-3 "$COLLAB is missing: after removing the collaborator, save the listing (see the rung text)"
+[[ -f $INVITE ]] || fail C-td-3 "$INVITE is missing: after removing the collaborator, save the invitation listing (see the rung text)"
+[[ $COLLAB -nt $MARK ]] || fail C-td-3 "$COLLAB is older than $MARK: save the listing again after you remove the collaborator"
+[[ $INVITE -nt $MARK ]] || fail C-td-3 "$INVITE is older than $MARK: save the listing again after you remove the invitation"
 set -f
-for login in $B_OUT; do
+logins=$(cat "$COLLAB")
+[[ -n ${logins//[[:space:]]/} ]] || fail C-td-3 "$COLLAB is empty: it should list at least the owner"
+lc_owner=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+extra=""
+for login in $logins; do
   lc_login=$(printf '%s' "$login" | tr '[:upper:]' '[:lower:]')
-  lc_me=$(printf '%s' "$me" | tr '[:upper:]' '[:lower:]')
-  [[ $lc_login == "$lc_me" ]] || extra="$extra $login"
+  [[ $lc_login == "$lc_owner" ]] || extra="$extra $login"
 done
+[[ -z $extra ]] || fail C-td-3 "still listed as a collaborator:$extra: remove them, then save the listing again"
+pending=$(cat "$INVITE" | tr '\n' ' ')
 set +f
-[[ -z $extra ]] || fail C-td-3 "still a collaborator on the repo:$extra: remove them after the report is posted"
-bounded "$WAIT" gh api "repos/$owner/$repo/invitations" --paginate --jq '.[].invitee.login'
-[[ $B_RC -eq 0 ]] || fail C-td-3 "the invitation listing failed (exit $B_RC)"
-[[ -z ${B_OUT//[[:space:]]/} ]] || fail C-td-3 "an invitation is still pending for: $(printf '%s' "$B_OUT" | tr '\n' ' ')"
+[[ -z ${pending//[[:space:]]/} ]] || fail C-td-3 "an invitation is still pending for: $pending"
 
 # C-td-4: no seat is left in the lab workspace. A stopped daemon has none.
 bounded "$WAIT" marvel get sessions -o json
