@@ -1,0 +1,15 @@
+#!/bin/sh
+# Test stub for marvel, rung 12. Answers come from files in $LABT_STATE, and
+# every call is appended to $LABT_STATE/calls, so a test can see what a check ran.
+S=$LABT_STATE
+echo "marvel $*" >>"$S/calls"
+case "$1" in
+  get)
+    cat "$S/sessions.out"
+    exit "$(cat "$S/sessions.rc")" ;;
+  config)
+    case "$2" in
+      list) cat "$S/config.out"; exit "$(cat "$S/config.rc")" ;;
+    esac ;;
+esac
+exit 0

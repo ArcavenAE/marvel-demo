@@ -1,0 +1,5 @@
+#!/bin/sh
+# Test stub for gh, rung 12: a tripwire. The check must make no gh call, so this
+# records the call in $LABT_STATE/calls, where the test looks for it, and fails.
+echo "gh $*" >>"$LABT_STATE/calls"
+exit 9
