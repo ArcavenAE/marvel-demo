@@ -99,7 +99,7 @@ dpid=$(printf '%s' "$dline" | sed -n 's/.* pid \([0-9][0-9]*\).*/\1/p')
 [[ -n $commit && -n $dpid ]] || fail C-r9 "could not read the daemon commit and pid from: $dline"
 bounded "$WAIT" marvel get sessions -o json
 [[ $B_RC -eq 0 ]] || fail C-r9 "marvel get sessions failed (exit $B_RC)"
-seats=$(printf '%s' "$B_OUT" | python3 -I -c 'import json, sys
+seats=$(printf '%s\n' "$B_OUT" | sed -n '/^\[/,$p' | python3 -I -c 'import json, sys
 try:
     d = json.load(sys.stdin)
 except Exception:

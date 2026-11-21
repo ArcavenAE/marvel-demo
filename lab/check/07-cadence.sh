@@ -83,7 +83,7 @@ while :; do
         last = s; n++
         if (n >= 2) delta = (last - prev + 86400) % 86400
       }
-      END { if (n < 2) print "count " n; else print "delta " delta }')
+      END { if (n < 2) print "count " n + 0; else print "delta " delta }')
     case $res in
       "count "*) seen="${res#count } cadence.slot-opened event(s) for lab/cron-note, want two two minutes apart" ;;
       "delta "*)
