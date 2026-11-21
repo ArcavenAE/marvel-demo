@@ -4,7 +4,7 @@ Demo: you walk the lab back. The report goes out first, then the lab's keys, tea
 
 You, in this order:
 
-1. Mark the start with `touch lab/state/teardown-start`. Then post the report while the invited collaborator can still see it: `just lab report 12 <nonce> <issue>` (the nonce is a string you choose, 8 to 64 letters, digits, `-` or `_`, and the issue is the number to post on). The report runs the check as it stands, so it may list what is still left; that is fine, the post is for the record.
+1. Mark the start with `touch lab/state/teardown-start`. Then post the report while the invited collaborator can still see it: `just lab report 12 <nonce> <issue>` (the nonce is a string you choose, 8 to 64 letters, digits, `-` or `_`, and the issue is the number to post on). The report runs the check as it stands, so the posted report shows the first check still failing; that is fine, the post is for the record.
 2. Stop the daemon yourself with `marvel stop --teardown`. It ends every seat and the managed bus.
 3. For every key you authorized for the lab, run `marvel keys revoke <fingerprint>` on the host that authorized it. List those fingerprints, one per line, in `lab/state/lab-keys` before you run the check. Run `just lab check 12` on each lab host, because the check reads that host's `~/.marvel/authorized_keys`.
 4. Remove each cluster you added for the lab with `marvel config remove-cluster <name>`.
