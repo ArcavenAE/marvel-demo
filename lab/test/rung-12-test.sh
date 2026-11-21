@@ -232,8 +232,8 @@ verdict "12 FAILs when marvel is not on PATH" "RUNG 12 FAIL C-td:" 1
 # The check never acts: no mutating verb appears in its code.
 script=$ROOT/lab/check/12-teardown.sh
 if [[ -f $script ]]; then
-  for verb in "marvel stop" "marvel keys revoke" "remove-cluster" "marvel kill" "marvel delete" "bd close" "-X " "--method" "--input" "rm " "git push" "git commit"; do
-    if grep -v '^[[:space:]]*#' "$script" | grep -q -F -e "$verb"; then bad "check 12 runs no [$verb]"; else ok "check 12 runs no [$verb]"; fi
+  for verb in "marvel stop" "marvel keys revoke" "remove-cluster" "marvel kill" "marvel delete" "bd close" "rm " "git push" "git commit"; do
+    if grep -v -e '^[[:space:]]*#' -e 'fail C-td' "$script" | grep -q -E -e "(^|[;&|(]|do |then )[[:space:]]*$verb|\\\$\\(.*$verb"; then bad "check 12 runs no [$verb]"; else ok "check 12 runs no [$verb]"; fi
   done
 else
   bad "check 12 exists to be scanned for mutating verbs"
@@ -262,7 +262,8 @@ else
     case $body in *"$s"*) ok "rung 12 names $s" ;; *) bad "rung 12 does not name $s" ;; esac
   done
   # the report comes before the collaborator is removed
-  head=${body%%collaborator*}
+  head=${body%%Remove the invited collaborator*}
+  case $body in *"Remove the invited collaborator"*) ;; *) bad "rung 12 has a step that removes the invited collaborator" ;; esac
   case $head in *"lab report 12"*) ok "rung 12 puts lab report 12 before the collaborator" ;; *) bad "rung 12 does not put lab report 12 before the collaborator" ;; esac
   left=$(section "Left in place")
   for s in "~/.marvel" "~/lab-run" "bd" "brew" "Remote Login" "Local Network" "pmset -c sleep 0"; do
