@@ -1,0 +1,12 @@
+#!/bin/sh
+# Test stub for lsof, rung 12. `lsof -nP -iTCP:<port> -sTCP:LISTEN -t` prints the
+# pids in $LABT_STATE/lsof.<port> and exits 1 when there are none, like the real one.
+S=$LABT_STATE
+echo "lsof $*" >>"$S/calls"
+port=""
+for a in "$@"; do
+  case $a in -iTCP:*) port=${a#-iTCP:} ;; esac
+done
+f=$S/lsof.$port
+if [ -s "$f" ]; then cat "$f"; exit 0; fi
+exit 1

@@ -21,12 +21,15 @@ bad() { n=$((n + 1)); fails=$((fails + 1)); printf 'not ok %s %s\n' "$n" "$1"; }
 expect() { if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1: got [$2] want [$3]"; fi; }
 
 # fixture <name>: a fresh lab root with the real harness and the real check 12,
-# a stub marvel on bin/, and a lab.lock that pins the check.
+# stub marvel, lsof and gh on bin/, a git origin for the repo the collaborator
+# listing reads, a scratch ~/.marvel with an authorized_keys file, one lab key
+# recorded in lab/state/lab-keys, and a lab.lock that pins the check. The real
+# ssh-keygen reads the keys; it writes only under scratch.
 fixture() {
   FX=$WORK/$1
   ST=$FX/state-stub
   HM=$FX/home
-  mkdir -p "$FX/lab/check" "$FX/lab/state" "$FX/bin" "$ST" "$HM"
+  mkdir -p "$FX/lab/check" "$FX/lab/state" "$FX/bin" "$ST" "$HM/.marvel"
   cp "$ROOT/lab/run" "$FX/lab/run"
   chmod +x "$FX/lab/run"
   for f in "$ROOT"/lab/check/12-*.sh; do
@@ -34,11 +37,27 @@ fixture() {
   done
   cp "$ROOT"/lab/test/stubs12/* "$FX/bin/"
   chmod +x "$FX"/bin/*
+  git -C "$FX" init -q
+  git -C "$FX" remote add origin https://github.com/newcomer/lab-kit
+  # three keys: the lab key, an unrelated key, and a second lab key
+  for k in lab other lab2; do
+    ssh-keygen -q -t ed25519 -N "" -C "$k@scratch" -f "$FX/key-$k" >/dev/null
+  done
+  cat "$FX/key-other.pub" >"$HM/.marvel/authorized_keys"
+  ssh-keygen -lf "$FX/key-lab.pub" | awk '{print $2}' >"$FX/lab/state/lab-keys"
+  LABFP=$(awk '{print $1; exit}' "$FX/lab/state/lab-keys")
+  LAB2FP=$(ssh-keygen -lf "$FX/key-lab2.pub" | awk '{print $2}')
   put sessions.out "[]"
   put sessions.rc 0
   put config.out "     NAME   ADDRESS      IDENTITY
 *    local  /scratch/marvel.sock  (default)  -"
   put config.rc 0
+  put gh.user "newcomer"
+  put gh.user.rc 0
+  put gh.collab "newcomer"
+  put gh.collab.rc 0
+  : >"$ST/gh.invites"
+  put gh.invites.rc 0
   : >"$ST/calls"
   LAB_ROOT=$FX "$FX/lab/run" digests >"$FX/lab.lock"
 }
@@ -46,7 +65,7 @@ put() { printf '%s\n' "$2" >"$ST/$1"; }
 
 lab() {
   OUT=$(env -i HOME="$HM" TMPDIR="$WORK" PATH="${LABPATH:-$FX/bin:/usr/bin:/bin}" \
-    LAB_ROOT="$FX" LABT_STATE="$ST" LAB_WAIT="${LAB_WAIT:-3}" \
+    LAB_ROOT="$FX" LABT_STATE="$ST" LAB_WAIT="${LAB_WAIT:-3}" LAB_PORTS="${LAB_PORTS:-4222}" \
     "$FX/lab/run" check 12 2>&1) && RC=0 || RC=$?
 }
 verdict() {
@@ -55,75 +74,165 @@ verdict() {
     *) bad "$1: [$OUT] lacks [$2]" ;;
   esac
 }
+named() { case $OUT in *"$2"*) ok "$1" ;; *) bad "$1: [$OUT] lacks [$2]" ;; esac; }
 seat() {
   printf '{"Name":"%s","Workspace":"%s","Team":"ticker","Role":"ticker","State":"running","PID":4101,"PaneID":"%%1","Generation":1}' "$1" "$2"
 }
 
-# --- the check ------------------------------------------------------------------
+# --- the baseline: everything torn down ------------------------------------------
 fixture r12
 lab
-verdict "12 passes with no sessions and only the local cluster" "RUNG 12 PASS" 0
-expect "12 ran only reads on marvel" "$(sort -u "$ST/calls" | tr '\n' ';')" "config list;get sessions -o json;"
+verdict "12 passes when the lab is torn down" "RUNG 12 PASS" 0
+calls=$(sort -u "$ST/calls" | tr '\n' ';')
+for c in "marvel config list" "marvel get sessions -o json" "gh api user" "gh api repos/newcomer/lab-kit/collaborators" "gh api repos/newcomer/lab-kit/invitations"; do
+  case $calls in *"$c"*) ok "12 read through [$c]" ;; *) bad "12 did not read through [$c]: [$calls]" ;; esac
+done
+# every gh call is a plain read: no method flag, no field, no input
+if grep '^gh ' "$ST/calls" | grep -q -E -e ' -X| --method| -f | -F | --field| --raw-field| --input'; then bad "12 makes a gh call that could write"; else ok "12 makes only plain gh api reads"; fi
+if grep -q -E '^marvel (stop|keys|kill|delete|apply|work)' "$ST/calls"; then bad "12 ran a marvel verb that acts"; else ok "12 ran no marvel verb that acts"; fi
 
+# --- C-td-1: no listener on the lab ports ----------------------------------------
+put lsof.4222 "4242"
+lab
+verdict "C-td-1 FAILs while a process listens on the bus port" "RUNG 12 FAIL C-td-1:" 1
+named "C-td-1 names the port" "4222"
+: >"$ST/lsof.4222"
+put lsof.4333 "777"
+LAB_PORTS="4222 4333" lab
+verdict "C-td-1 FAILs on the second of two lab ports" "RUNG 12 FAIL C-td-1:" 1
+named "C-td-1 names the second port" "4333"
+LAB_PORTS="4222" lab
+verdict "C-td-1 passes when only a port outside the lab list listens" "RUNG 12 PASS" 0
+: >"$ST/lsof.4333"
+mv "$FX/bin/lsof" "$FX/lsof.away"
+lab
+verdict "C-td-1 FAILs when lsof is not there to look" "RUNG 12 FAIL C-td-1:" 1
+mv "$FX/lsof.away" "$FX/bin/lsof"
+
+# --- C-td-2: the lab key is gone from authorized_keys ----------------------------
+cat "$FX/key-lab.pub" >>"$HM/.marvel/authorized_keys"
+lab
+verdict "C-td-2 FAILs while the lab key is still authorized" "RUNG 12 FAIL C-td-2:" 1
+named "C-td-2 names the fingerprint" "$LABFP"
+cat "$FX/key-other.pub" >"$HM/.marvel/authorized_keys"
+lab
+verdict "C-td-2 passes once only an unrelated key remains" "RUNG 12 PASS" 0
+printf '%s\n' "$LABFP" "$LAB2FP" >"$FX/lab/state/lab-keys"
+cat "$FX/key-lab2.pub" >>"$HM/.marvel/authorized_keys"
+lab
+verdict "C-td-2 FAILs on the second of two lab keys" "RUNG 12 FAIL C-td-2:" 1
+named "C-td-2 names the second fingerprint" "$LAB2FP"
+cat "$FX/key-other.pub" >"$HM/.marvel/authorized_keys"
+mv "$HM/.marvel/authorized_keys" "$HM/.marvel/authorized_keys.away"
+lab
+verdict "C-td-2 passes when the host has no authorized_keys file at all" "RUNG 12 PASS" 0
+mv "$HM/.marvel/authorized_keys.away" "$HM/.marvel/authorized_keys"
+mv "$FX/lab/state/lab-keys" "$FX/lab-keys.away"
+lab
+verdict "C-td-2 FAILs when the lab key list was never recorded" "RUNG 12 FAIL C-td-2:" 1
+printf 'not-a-fingerprint\n' >"$FX/lab/state/lab-keys"
+lab
+verdict "C-td-2 FAILs on a lab key list that holds no fingerprint" "RUNG 12 FAIL C-td-2:" 1
+: >"$FX/lab/state/lab-keys"
+lab
+verdict "C-td-2 FAILs on an empty lab key list" "RUNG 12 FAIL C-td-2:" 1
+mv "$FX/lab-keys.away" "$FX/lab/state/lab-keys"
+printf 'garbage that is not a key\n' >"$HM/.marvel/authorized_keys"
+lab
+verdict "C-td-2 FAILs when authorized_keys cannot be read as keys" "RUNG 12 FAIL C-td-2:" 1
+cat "$FX/key-other.pub" >"$HM/.marvel/authorized_keys"
+
+# --- C-td-3: the collaborator is gone, read from a listing -----------------------
+put gh.collab "newcomer
+invitee-login"
+lab
+verdict "C-td-3 FAILs while a second collaborator is on the repo" "RUNG 12 FAIL C-td-3:" 1
+named "C-td-3 names the collaborator" "invitee-login"
+put gh.collab "newcomer"
+put gh.invites "invitee-login"
+lab
+verdict "C-td-3 FAILs while an invitation is still pending" "RUNG 12 FAIL C-td-3:" 1
+named "C-td-3 names the invited login" "invitee-login"
+: >"$ST/gh.invites"
+put gh.collab "NewComer"
+lab
+verdict "C-td-3 compares the owner's login without regard to case" "RUNG 12 PASS" 0
+put gh.collab "newcomer"
+put gh.collab.rc 1
+lab
+verdict "C-td-3 FAILs when the collaborator listing fails" "RUNG 12 FAIL C-td-3:" 1
+put gh.collab.rc 0
+put gh.invites.rc 1
+lab
+verdict "C-td-3 FAILs when the invitation listing fails" "RUNG 12 FAIL C-td-3:" 1
+put gh.invites.rc 0
+put gh.user.rc 1
+lab
+verdict "C-td-3 FAILs when the signed-in login cannot be read" "RUNG 12 FAIL C-td-3:" 1
+put gh.user.rc 0
+: >"$ST/gh.collab"
+lab
+verdict "C-td-3 FAILs on an empty collaborator listing" "RUNG 12 FAIL C-td-3:" 1
+put gh.collab "newcomer"
+git -C "$FX" remote set-url origin git@example.invalid:newcomer/lab-kit.git
+lab
+verdict "C-td-3 FAILs when origin is not a github.com repository" "RUNG 12 FAIL C-td-3:" 1
+git -C "$FX" remote set-url origin https://github.com/newcomer/lab-kit
+mv "$FX/bin/gh" "$FX/gh.away"
+lab
+verdict "C-td-3 FAILs when gh is not on PATH" "RUNG 12 FAIL C-td-3:" 1
+mv "$FX/gh.away" "$FX/bin/gh"
+
+# --- the extras: no lab seat, and no cluster beyond local ------------------------
 put sessions.out "[$(seat other-ticker-g1-0 other)]"
 lab
 verdict "12 passes when a session belongs to another workspace" "RUNG 12 PASS" 0
-
 put sessions.out "[$(seat ticker-ticker-g1-0 lab)]"
 lab
-verdict "12 FAILs while a seat is still running in the lab workspace" "RUNG 12 FAIL C-r12-a:" 1
-case $OUT in *"ticker-ticker-g1-0"*) ok "12 names the seat that is left" ;; *) bad "12 does not name the seat that is left: [$OUT]" ;; esac
-
+verdict "C-td-4 FAILs while a seat is still running in the lab workspace" "RUNG 12 FAIL C-td-4:" 1
+named "C-td-4 names the seat that is left" "ticker-ticker-g1-0"
 put sessions.out "[$(seat other-ticker-g1-0 other),$(seat ticker-ticker-g1-0 lab)]"
 lab
-verdict "12 FAILs when a lab seat sits beside another workspace's seat" "RUNG 12 FAIL C-r12-a:" 1
-
+verdict "C-td-4 FAILs when a lab seat sits beside another workspace's seat" "RUNG 12 FAIL C-td-4:" 1
 put sessions.out "Error: connect to daemon at /scratch/marvel.sock (unix): dial unix /scratch/marvel.sock: connect: no such file or directory"
 put sessions.rc 1
 lab
 verdict "12 passes when the daemon is stopped (marvel stop --teardown ran)" "RUNG 12 PASS" 0
-
 put sessions.out "boom: something else broke"
-put sessions.rc 1
 lab
-verdict "12 FAILs when marvel get sessions fails for another reason" "RUNG 12 FAIL C-r12-a:" 1
-
+verdict "C-td-4 FAILs when marvel get sessions fails for another reason" "RUNG 12 FAIL C-td-4:" 1
 put sessions.out "not json at all"
 put sessions.rc 0
 lab
-verdict "12 FAILs when the sessions answer cannot be read" "RUNG 12 FAIL C-r12-a:" 1
-
+verdict "C-td-4 FAILs when the sessions answer cannot be read" "RUNG 12 FAIL C-td-4:" 1
 put sessions.out "[]"
-put sessions.rc 0
 put config.out "     NAME     ADDRESS               IDENTITY
 *    local    /scratch/marvel.sock  (default)  -
      friend   mrvl://friend-mac     -"
 lab
-verdict "12 FAILs while a cluster beyond local is still configured" "RUNG 12 FAIL C-r12-b:" 1
-case $OUT in *"friend"*) ok "12 names the cluster that is left" ;; *) bad "12 does not name the cluster that is left: [$OUT]" ;; esac
-
+verdict "C-td-5 FAILs while a cluster beyond local is still configured" "RUNG 12 FAIL C-td-5:" 1
+named "C-td-5 names the cluster that is left" "friend"
 put config.out "     NAME   ADDRESS              IDENTITY
      local  /scratch/marvel.sock  (default)  -"
 lab
 verdict "12 passes when local is not the current cluster but is the only one" "RUNG 12 PASS" 0
-
 put config.out "boom"
 put config.rc 1
 lab
-verdict "12 FAILs when marvel config list fails" "RUNG 12 FAIL C-r12-b:" 1
-
+verdict "C-td-5 FAILs when marvel config list fails" "RUNG 12 FAIL C-td-5:" 1
 put config.out ""
 put config.rc 0
 lab
-verdict "12 FAILs when marvel config list prints nothing" "RUNG 12 FAIL C-r12-b:" 1
-
+verdict "C-td-5 FAILs when marvel config list prints nothing" "RUNG 12 FAIL C-td-5:" 1
+put config.out "     NAME   ADDRESS      IDENTITY
+*    local  /scratch/marvel.sock  (default)  -"
 LABPATH=/usr/bin:/bin lab
-verdict "12 FAILs when marvel is not on PATH" "RUNG 12 FAIL C-r12:" 1
+verdict "12 FAILs when marvel is not on PATH" "RUNG 12 FAIL C-td:" 1
 
-# The check never acts: a script that mentions a mutating verb fails the static test.
+# The check never acts: no mutating verb appears in its code.
 script=$ROOT/lab/check/12-teardown.sh
 if [[ -f $script ]]; then
-  for verb in "marvel stop" "marvel keys" "remove-cluster" "marvel kill" "marvel delete" "bd close" "gh " "rm " "git "; do
+  for verb in "marvel stop" "marvel keys revoke" "remove-cluster" "marvel kill" "marvel delete" "bd close" "-X " "--method" "--input" "rm " "git push" "git commit"; do
     if grep -v '^[[:space:]]*#' "$script" | grep -q -F -e "$verb"; then bad "check 12 runs no [$verb]"; else ok "check 12 runs no [$verb]"; fi
   done
 else
@@ -149,7 +258,7 @@ else
   [[ -n $(section Tools) ]] && ok "rung 12 has a Tools section" || bad "rung 12 has no Tools section"
   [[ -n $(section "Expected prompts") ]] && ok "rung 12 has an Expected prompts section" || bad "rung 12 has no Expected prompts section"
   [[ -n $(section "Left in place") ]] && ok "rung 12 has a Left in place section" || bad "rung 12 has no Left in place section"
-  for s in "lab report 12" "collaborator" "marvel stop --teardown" "marvel keys revoke" "marvel config remove-cluster" "just lab check 12"; do
+  for s in "lab report 12" "collaborator" "lab-keys" "lsof" "marvel stop --teardown" "marvel keys revoke" "marvel config remove-cluster" "just lab check 12"; do
     case $body in *"$s"*) ok "rung 12 names $s" ;; *) bad "rung 12 does not name $s" ;; esac
   done
   # the report comes before the collaborator is removed
@@ -164,7 +273,7 @@ fi
 # --- hygiene --------------------------------------------------------------------
 userpath="/Use""rs/"
 emdash=$'\xe2\x80\x94'
-for f in "$ROOT"/lab/check/12-*.sh "$ROOT"/lab/rung/12-*.md "$ROOT"/lab/test/rung-12-test.sh "$ROOT"/lab/test/stubs12/marvel; do
+for f in "$ROOT"/lab/check/12-*.sh "$ROOT"/lab/rung/12-*.md "$ROOT"/lab/test/rung-12-test.sh "$ROOT"/lab/test/stubs12/marvel "$ROOT"/lab/test/stubs12/lsof "$ROOT"/lab/test/stubs12/gh; do
   [[ -f $f ]] || { bad "${f#"$ROOT"/} exists"; continue; }
   if grep -q -e "$userpath" -e "$emdash" "$f"; then bad "${f#"$ROOT"/} has a user path or an em dash"; else ok "${f#"$ROOT"/} has no user path or em dash"; fi
 done

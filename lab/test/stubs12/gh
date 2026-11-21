@@ -1,0 +1,14 @@
+#!/bin/sh
+# Test stub for gh, rung 12. Only `gh api <path> ...` is answered, from files in
+# $LABT_STATE; every call is recorded in $LABT_STATE/calls.
+S=$LABT_STATE
+echo "gh $*" >>"$S/calls"
+[ "$1" = api ] || exit 9
+case "$2" in
+  user) k=user ;;
+  repos/*/collaborators) k=collab ;;
+  repos/*/invitations) k=invites ;;
+  *) exit 8 ;;
+esac
+cat "$S/gh.$k"
+exit "$(cat "$S/gh.$k.rc")"
