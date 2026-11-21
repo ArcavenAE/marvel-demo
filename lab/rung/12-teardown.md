@@ -13,14 +13,14 @@ You, in this order:
 
 ## Tools
 
-- marvel, with `marvel stop --teardown`, `marvel keys revoke` and `marvel config remove-cluster`. The agent is denied the last three, so you run them.
+- marvel, with `marvel stop --teardown`, `marvel keys revoke` and `marvel config remove-cluster`. None of the three is on the agent's allow list, so it may ask you first; you run them yourself.
 - `lsof`, `ssh-keygen` and `git`, which the check reads with. The check dials nothing. You run `gh` (signed in) yourself for the two listings in step 5.
 - `lab/state/lab-keys`: one `SHA256:` fingerprint per line, written by you. `ssh-keygen -lf <public key file>` prints a fingerprint.
 
 ## Expected prompts
 
 - You run every command here yourself, so the agent's permission prompts do not apply. Where a command asks you to confirm, answer yes.
-- If you ask the agent to run `just lab check 12` or `just lab report 12`, they are reads and a post to one issue; the stop, revoke and remove-cluster commands are denied to it.
+- If you ask the agent to run `just lab check 12` or `just lab report 12`, they are reads and a post to one issue; the stop, revoke and remove-cluster commands are not on its allow list, so it may ask you first.
 
 ## Left in place
 
