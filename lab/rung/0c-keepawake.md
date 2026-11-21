@@ -13,6 +13,6 @@ You: ask the agent to apply manifests/keepawake.toml with marvel and show you th
 ## Expected prompts
 
 - Applying the manifest asks, because `marvel work` is not on the agent's permission list. Answer yes.
-- `marvel kill` asks, because it is not on the list either. Answer yes; the session should come back on its own within about 30 seconds.
+- `marvel kill` asks, because it is not on the list either. Answer yes; marvel restarts the session, and the check waits up to 30 seconds for it to come back.
 - `marvel get sessions` does not ask.
 - This keeps the machine from idle sleep only while the session runs. It does not stop a lid-closed laptop from sleeping.
