@@ -168,10 +168,12 @@ touch -t 202611210200 "$FX/lab/state/collaborators"
 mv "$FX/lab/state/collaborators" "$FX/collab.away"
 lab
 verdict "C-td-3 FAILs when the collaborator listing was never saved" "RUNG 12 FAIL C-td-3:" 1
+named "C-td-3 says the collaborator listing is missing" "lab/state/collaborators is missing"
 mv "$FX/collab.away" "$FX/lab/state/collaborators"
 mv "$FX/lab/state/invitations" "$FX/invites.away"
 lab
 verdict "C-td-3 FAILs when the invitation listing was never saved" "RUNG 12 FAIL C-td-3:" 1
+named "C-td-3 says the invitation listing is missing" "lab/state/invitations is missing"
 mv "$FX/invites.away" "$FX/lab/state/invitations"
 touch -t 202611210030 "$FX/lab/state/collaborators"
 lab
@@ -195,6 +197,9 @@ touch -t 202611210200 "$FX/lab/state/collaborators"
 git -C "$FX" remote set-url origin git@example.invalid:newcomer/lab-kit.git
 lab
 verdict "C-td-3 FAILs when origin is not a github.com repository" "RUNG 12 FAIL C-td-3:" 1
+git -C "$FX" remote set-url origin https://github.com/NewComer/lab-kit
+lab
+verdict "C-td-3 compares the origin owner's login without regard to case" "RUNG 12 PASS" 0
 git -C "$FX" remote set-url origin https://github.com/other-owner/lab-kit
 lab
 verdict "C-td-3 FAILs when the listing does not name the origin's owner" "RUNG 12 FAIL C-td-3:" 1
