@@ -213,6 +213,38 @@ if grep -q '^gh ' "$ST/calls"; then bad "C-td-3 called gh: it makes no live call
 lab
 verdict "12 passes again once the listings are fresh and name only the owner" "RUNG 12 PASS" 0
 
+# --- C-td-3 runs last: only the collaborator pending reads exactly C-td-3 --------
+printf 'newcomer\ninvitee-login\n' >"$FX/lab/state/collaborators"
+touch -t 202611210200 "$FX/lab/state/collaborators"
+lab
+case $OUT in "RUNG 12 FAIL C-td-3:"*) ok "only the collaborator pending reads RUNG 12 FAIL C-td-3 first" ;; *) bad "only the collaborator pending does not read RUNG 12 FAIL C-td-3 first: [$OUT]" ;; esac
+put sessions.out "[$(seat ticker-ticker-g1-0 lab)]"
+lab
+verdict "a lab seat left beside a pending collaborator reads C-td-4, so C-td-3 runs after it" "RUNG 12 FAIL C-td-4:" 1
+put sessions.out "[]"
+put config.out "     NAME     ADDRESS               IDENTITY
+*    local    /scratch/marvel.sock  (default)  -
+     friend   mrvl://friend-mac     -"
+lab
+verdict "a cluster left beside a pending collaborator reads C-td-5, so C-td-3 runs after it" "RUNG 12 FAIL C-td-5:" 1
+put config.out "     NAME   ADDRESS      IDENTITY
+*    local  /scratch/marvel.sock  (default)  -"
+put lsof.4222 "4242"
+lab
+verdict "a listener beside a pending collaborator reads C-td-1, so C-td-3 runs after it" "RUNG 12 FAIL C-td-1:" 1
+: >"$ST/lsof.4222"
+cat "$FX/key-lab.pub" >>"$HM/.marvel/authorized_keys"
+lab
+verdict "a lab key left beside a pending collaborator reads C-td-2, so C-td-3 runs after it" "RUNG 12 FAIL C-td-2:" 1
+cat "$FX/key-other.pub" >"$HM/.marvel/authorized_keys"
+printf 'newcomer\n' >"$FX/lab/state/collaborators"
+touch -t 202611210200 "$FX/lab/state/collaborators"
+if [[ -f $ROOT/lab/check/12-teardown.sh ]]; then
+  first3=$(grep -n 'fail C-td-3' "$ROOT/lab/check/12-teardown.sh" | head -1 | cut -d: -f1)
+  last5=$(grep -n 'fail C-td-5' "$ROOT/lab/check/12-teardown.sh" | tail -1 | cut -d: -f1)
+  if [[ -n $first3 && -n $last5 && $first3 -gt $last5 ]]; then ok "C-td-3 comes after C-td-5 in the check"; else bad "C-td-3 does not come after C-td-5 in the check (3 at $first3, 5 at $last5)"; fi
+fi
+
 # --- the extras: no lab seat, and no cluster beyond local ------------------------
 put sessions.out "[$(seat other-ticker-g1-0 other)]"
 lab
@@ -294,8 +326,16 @@ else
   [[ -n $(section Tools) ]] && ok "rung 12 has a Tools section" || bad "rung 12 has no Tools section"
   [[ -n $(section "Expected prompts") ]] && ok "rung 12 has an Expected prompts section" || bad "rung 12 has no Expected prompts section"
   [[ -n $(section "Left in place") ]] && ok "rung 12 has a Left in place section" || bad "rung 12 has no Left in place section"
-  case $body in *"shows the first check still failing"*) ok "rung 12 says the posted report shows the first check still failing" ;; *) bad "rung 12 does not say the posted report shows the first check still failing" ;; esac
-  case $body in *"may list what is still left"*) bad "rung 12 still says the report may list what is still left" ;; *) ok "rung 12 no longer says the report may list what is left" ;; esac
+  case $body in *"RUNG 12 FAIL C-td-3"*) ok "rung 12 says the posted report is expected to read RUNG 12 FAIL C-td-3" ;; *) bad "rung 12 does not say the posted report is expected to read RUNG 12 FAIL C-td-3" ;; esac
+  case $body in *"may list what is still left"*|*"shows the first check still failing"*) bad "rung 12 keeps the old report wording" ;; *) ok "rung 12 drops the old report wording" ;; esac
+  # order of the steps: everything else before the report, the report before the collaborator
+  firstpos() { local rest=${body%%"$1"*}; [[ $rest != "$body" ]] && echo "${#rest}" || echo -1; }
+  prev=-1
+  for s in "marvel stop --teardown" "marvel keys revoke" "marvel config remove-cluster" "touch lab/state/teardown-start" "just lab report 12" "Remove the invited collaborator" "gh api"; do
+    pos=$(firstpos "$s")
+    if [[ $pos -gt $prev ]]; then ok "rung 12 step [$s] comes after the one before it"; else bad "rung 12 step [$s] is out of order (at $pos, previous at $prev)"; fi
+    prev=$pos
+  done
   for s in "lab report 12" "collaborator" "lab-keys" "lsof" "teardown-start" "gh api" "lab/state/collaborators" "lab/state/invitations" "marvel stop --teardown" "marvel keys revoke" "marvel config remove-cluster" "just lab check 12"; do
     case $body in *"$s"*) ok "rung 12 names $s" ;; *) bad "rung 12 does not name $s" ;; esac
   done
