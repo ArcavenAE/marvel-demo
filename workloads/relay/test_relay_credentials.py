@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 try:
@@ -38,6 +39,7 @@ echo "$*" >> "$d/argv.log"
 echo "user=$NATS_USER pass=$NATS_PASSWORD args=$*" >> "$d/env.log"
 case " $* " in
   *" sub "*)
+    if [ -n "$STUB_HANG" ]; then echo $$ > "$d/sub.pid"; exec sleep 30; fi
     printf '%s' "$STUB_ROTATE" > "$DIRECTOR_NATS_PASS_FILE"
     case " $* " in
       *relay.ping*) echo "ping 1" ;;
@@ -81,6 +83,7 @@ class Run:
             "TMPDIR": self.root,
             "STUB_DIR": self.stub,
             "STUB_ROTATE": SECRET2,
+            "STUB_HANG": "",
             "MARVEL_SESSION": "relay-%s-g1-0" % role,
             "NATS_URL": "nats://127.0.0.1:14222",
             "DIRECTOR_NATS_USER": "relay",
@@ -90,8 +93,13 @@ class Run:
             "RELAY_DRAIN": "0",
         }
         env.update(extra or {})
-        p = subprocess.run(["sh", "-c", role_script(role)], env=env, capture_output=True, timeout=30)
-        self.out = p.stdout.decode(errors="replace") + p.stderr.decode(errors="replace")
+        # Output goes to a file, not a pipe: a process the role leaves behind would hold a pipe open
+        # and make this wait for it.
+        outpath = os.path.join(self.root, "role.out")
+        with open(outpath, "wb") as outf:
+            p = subprocess.run(["sh", "-c", role_script(role)], env=env, stdout=outf, stderr=subprocess.STDOUT, timeout=30)
+        with open(outpath, errors="replace") as outf:
+            self.out = outf.read()
         self.rc = p.returncode
 
     def read(self, *parts):
@@ -151,6 +159,31 @@ class Subjects(unittest.TestCase):
             argv = r.read("stub", "argv.log")
             self.assertIn("agent.lab.relay.ping", argv, "%s never used agent.lab.relay.ping" % role)
             self.assertNotIn(" lab.relay.", argv, "%s still uses a subject outside agent.lab.relay.>" % role)
+
+
+class PingTrap(unittest.TestCase):
+    def test_the_exit_trap_stops_the_nats_sub_itself(self):
+        # The stub's sub writes its own pid and then stays up. When ping ends, its trap must
+        # have killed that process, not only a subshell around it.
+        r = Run(self, "ping", {"STUB_HANG": "1"})
+        pidfile = os.path.join(r.stub, "sub.pid")
+        self.assertTrue(os.path.exists(pidfile), "the ping role never started a nats sub")
+        pid = int(open(pidfile).read().strip())
+        try:
+            alive = True
+            for _ in range(20):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    alive = False
+                    break
+                time.sleep(0.1)
+            self.assertFalse(alive, "the nats sub (pid %d) outlived the ping role: the trap killed the wrong process" % pid)
+        finally:
+            try:
+                os.kill(pid, 15)
+            except ProcessLookupError:
+                pass
 
 
 class PongFile(unittest.TestCase):

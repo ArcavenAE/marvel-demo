@@ -191,6 +191,10 @@ put events.out "TIME      SEV   KIND                  SESSION     MESSAGE
 03:35:33  info  team.shift-completed  lab/ticker  gen 2 active"
 lab 04
 verdict "04 passes when the successor continues the predecessor's count" "RUNG 04 PASS" 0
+sessions "$(seat $TICKER0 ticker running 4101 %1 1)"
+lab 04
+verdict "04 FAILs when the only second generation file belongs to a session marvel no longer lists" "RUNG 04 FAIL C-r4:" 1
+sessions "$(seat $SUCC ticker running 4201 %2 2)"
 : >"$LOGS/ticker/$SUCC.log"
 ticks "$LOGS/ticker/$SUCC.log" $SUCC 2 1 2 v1
 lab 04
@@ -418,6 +422,10 @@ has 03 ALL "marvel scale"
 has 04 ALL "marvel shift" "--role ticker" "handoff"
 has 05 ALL "marvel inject" "nonce-05" "marvel capture"
 has 05 "Expected prompts" "marvel inject"
+has 01 ALL "clear lab-run/ticker"
+f06=$(rungfile 06)
+case $(cat "${f06:-/dev/null}") in *"own bus user"*) bad "rung 06 says each seat has its own bus user: the seats share the team user" ;; *) ok "rung 06 does not claim a bus user per seat" ;; esac
+has 06 ALL "password file" "team user"
 has 06 ALL "DIRECTOR_NATS_PASS_FILE" "agent.lab.relay" "nats" "marvel work"
 has 07 ALL "marvel events" "cadence.slot-opened"
 has 08 ALL "bd" "lab-ticker-note"
