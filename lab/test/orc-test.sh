@@ -176,6 +176,11 @@ if [[ -f $ROOT/lab/HARNESS.md ]]; then
     expect_has "roots: settings.json denies Edit on $r in character class form" "$settings" "\"Edit(./$(classed "$r"))\""
   done
   expect_has "roots: the section says the denies use a character class per letter" "$roots_text" "character class"
+  # The one gap the class form leaves: characters that case folding maps onto ASCII letters.
+  expect_has "roots: the section names the case-folding gap" "$roots_text" "case folding"
+  expect_has "roots: the gap names the Kelvin sign" "$roots_text" "Kelvin sign"
+  expect_has "roots: the gap names the long s (U+017F)" "$roots_text" "U+017F"
+  expect_has "roots: the gap says the settings stay ASCII" "$roots_text" "ASCII"
   # The instruction text the agent can edit is named, and granted nothing.
   instr_text=$(awk '/^## Instruction text/{f=1;next} /^## /{f=0} f' "$ROOT/lab/HARNESS.md")
   expect_has "instruction text: HARNESS.md has the section" "$harness" "## Instruction text"
