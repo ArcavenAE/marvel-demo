@@ -1,14 +1,5 @@
 #!/bin/sh
-# Test stub for gh, rung 12. Only `gh api <path> ...` is answered, from files in
-# $LABT_STATE; every call is recorded in $LABT_STATE/calls.
-S=$LABT_STATE
-echo "gh $*" >>"$S/calls"
-[ "$1" = api ] || exit 9
-case "$2" in
-  user) k=user ;;
-  repos/*/collaborators) k=collab ;;
-  repos/*/invitations) k=invites ;;
-  *) exit 8 ;;
-esac
-cat "$S/gh.$k"
-exit "$(cat "$S/gh.$k.rc")"
+# Test stub for gh, rung 12: a tripwire. The check must make no gh call, so this
+# records the call in $LABT_STATE/calls, where the test looks for it, and fails.
+echo "gh $*" >>"$LABT_STATE/calls"
+exit 9

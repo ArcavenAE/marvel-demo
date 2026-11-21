@@ -21,8 +21,9 @@ bad() { n=$((n + 1)); fails=$((fails + 1)); printf 'not ok %s %s\n' "$n" "$1"; }
 expect() { if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1: got [$2] want [$3]"; fi; }
 
 # fixture <name>: a fresh lab root with the real harness and the real check 12,
-# stub marvel, lsof and gh on bin/, a git origin for the repo the collaborator
-# listing reads, a scratch ~/.marvel with an authorized_keys file, one lab key
+# stub marvel and lsof on bin/, a gh stub that only records a call (the check must
+# make none), a git origin whose owner is the account that should remain, the
+# collaborator and invitation listings the human saved under lab/state, a scratch ~/.marvel with an authorized_keys file, one lab key
 # recorded in lab/state/lab-keys, and a lab.lock that pins the check. The real
 # ssh-keygen reads the keys; it writes only under scratch.
 fixture() {
@@ -52,12 +53,11 @@ fixture() {
   put config.out "     NAME   ADDRESS      IDENTITY
 *    local  /scratch/marvel.sock  (default)  -"
   put config.rc 0
-  put gh.user "newcomer"
-  put gh.user.rc 0
-  put gh.collab "newcomer"
-  put gh.collab.rc 0
-  : >"$ST/gh.invites"
-  put gh.invites.rc 0
+  # the human's listings, saved after the teardown started: the marker is older
+  touch -t 202611210100 "$FX/lab/state/teardown-start"
+  printf 'newcomer\n' >"$FX/lab/state/collaborators"
+  : >"$FX/lab/state/invitations"
+  touch -t 202611210200 "$FX/lab/state/collaborators" "$FX/lab/state/invitations"
   : >"$ST/calls"
   LAB_ROOT=$FX "$FX/lab/run" digests >"$FX/lab.lock"
 }
@@ -84,11 +84,11 @@ fixture r12
 lab
 verdict "12 passes when the lab is torn down" "RUNG 12 PASS" 0
 calls=$(sort -u "$ST/calls" | tr '\n' ';')
-for c in "marvel config list" "marvel get sessions -o json" "gh api user" "gh api repos/newcomer/lab-kit/collaborators" "gh api repos/newcomer/lab-kit/invitations"; do
+for c in "marvel config list" "marvel get sessions -o json" "lsof -nP -iTCP:4222"; do
   case $calls in *"$c"*) ok "12 read through [$c]" ;; *) bad "12 did not read through [$c]: [$calls]" ;; esac
 done
 # every gh call is a plain read: no method flag, no field, no input
-if grep '^gh ' "$ST/calls" | grep -q -E -e ' -X| --method| -f | -F | --field| --raw-field| --input'; then bad "12 makes a gh call that could write"; else ok "12 makes only plain gh api reads"; fi
+if grep -q '^gh ' "$ST/calls"; then bad "12 called gh: it makes no live call"; else ok "12 calls no gh"; fi
 if grep -q -E '^marvel (stop|keys|kill|delete|apply|work)' "$ST/calls"; then bad "12 ran a marvel verb that acts"; else ok "12 ran no marvel verb that acts"; fi
 
 # --- C-td-1: no listener on the lab ports ----------------------------------------
@@ -142,46 +142,66 @@ lab
 verdict "C-td-2 FAILs when authorized_keys cannot be read as keys" "RUNG 12 FAIL C-td-2:" 1
 cat "$FX/key-other.pub" >"$HM/.marvel/authorized_keys"
 
-# --- C-td-3: the collaborator is gone, read from a listing -----------------------
-put gh.collab "newcomer
-invitee-login"
+# --- C-td-3: the collaborator is gone, read from the listings you saved ----------
+# The check calls no gh. It reads lab/state/collaborators and lab/state/invitations,
+# which the human saved with gh after the teardown started (lab/state/teardown-start).
+printf 'newcomer\ninvitee-login\n' >"$FX/lab/state/collaborators"
+touch -t 202611210200 "$FX/lab/state/collaborators"
 lab
-verdict "C-td-3 FAILs while a second collaborator is on the repo" "RUNG 12 FAIL C-td-3:" 1
+verdict "C-td-3 FAILs while a second collaborator is still listed" "RUNG 12 FAIL C-td-3:" 1
 named "C-td-3 names the collaborator" "invitee-login"
-put gh.collab "newcomer"
-put gh.invites "invitee-login"
+printf 'newcomer\n' >"$FX/lab/state/collaborators"
+touch -t 202611210200 "$FX/lab/state/collaborators"
+printf 'invitee-login\n' >"$FX/lab/state/invitations"
+touch -t 202611210200 "$FX/lab/state/invitations"
 lab
 verdict "C-td-3 FAILs while an invitation is still pending" "RUNG 12 FAIL C-td-3:" 1
 named "C-td-3 names the invited login" "invitee-login"
-: >"$ST/gh.invites"
-put gh.collab "NewComer"
+: >"$FX/lab/state/invitations"
+touch -t 202611210200 "$FX/lab/state/invitations"
+printf 'NewComer\n' >"$FX/lab/state/collaborators"
+touch -t 202611210200 "$FX/lab/state/collaborators"
 lab
 verdict "C-td-3 compares the owner's login without regard to case" "RUNG 12 PASS" 0
-put gh.collab "newcomer"
-put gh.collab.rc 1
+printf 'newcomer\n' >"$FX/lab/state/collaborators"
+touch -t 202611210200 "$FX/lab/state/collaborators"
+mv "$FX/lab/state/collaborators" "$FX/collab.away"
 lab
-verdict "C-td-3 FAILs when the collaborator listing fails" "RUNG 12 FAIL C-td-3:" 1
-put gh.collab.rc 0
-put gh.invites.rc 1
+verdict "C-td-3 FAILs when the collaborator listing was never saved" "RUNG 12 FAIL C-td-3:" 1
+mv "$FX/collab.away" "$FX/lab/state/collaborators"
+mv "$FX/lab/state/invitations" "$FX/invites.away"
 lab
-verdict "C-td-3 FAILs when the invitation listing fails" "RUNG 12 FAIL C-td-3:" 1
-put gh.invites.rc 0
-put gh.user.rc 1
+verdict "C-td-3 FAILs when the invitation listing was never saved" "RUNG 12 FAIL C-td-3:" 1
+mv "$FX/invites.away" "$FX/lab/state/invitations"
+touch -t 202611210030 "$FX/lab/state/collaborators"
 lab
-verdict "C-td-3 FAILs when the signed-in login cannot be read" "RUNG 12 FAIL C-td-3:" 1
-put gh.user.rc 0
-: >"$ST/gh.collab"
+verdict "C-td-3 FAILs when the collaborator listing is older than the teardown start" "RUNG 12 FAIL C-td-3:" 1
+named "C-td-3 says the listing is stale" "older"
+touch -t 202611210200 "$FX/lab/state/collaborators"
+touch -t 202611210030 "$FX/lab/state/invitations"
+lab
+verdict "C-td-3 FAILs when the invitation listing is older than the teardown start" "RUNG 12 FAIL C-td-3:" 1
+touch -t 202611210200 "$FX/lab/state/invitations"
+mv "$FX/lab/state/teardown-start" "$FX/start.away"
+lab
+verdict "C-td-3 FAILs when the teardown start was never marked" "RUNG 12 FAIL C-td-3:" 1
+mv "$FX/start.away" "$FX/lab/state/teardown-start"
+: >"$FX/lab/state/collaborators"
+touch -t 202611210200 "$FX/lab/state/collaborators"
 lab
 verdict "C-td-3 FAILs on an empty collaborator listing" "RUNG 12 FAIL C-td-3:" 1
-put gh.collab "newcomer"
+printf 'newcomer\n' >"$FX/lab/state/collaborators"
+touch -t 202611210200 "$FX/lab/state/collaborators"
 git -C "$FX" remote set-url origin git@example.invalid:newcomer/lab-kit.git
 lab
 verdict "C-td-3 FAILs when origin is not a github.com repository" "RUNG 12 FAIL C-td-3:" 1
-git -C "$FX" remote set-url origin https://github.com/newcomer/lab-kit
-mv "$FX/bin/gh" "$FX/gh.away"
+git -C "$FX" remote set-url origin https://github.com/other-owner/lab-kit
 lab
-verdict "C-td-3 FAILs when gh is not on PATH" "RUNG 12 FAIL C-td-3:" 1
-mv "$FX/gh.away" "$FX/bin/gh"
+verdict "C-td-3 FAILs when the listing does not name the origin's owner" "RUNG 12 FAIL C-td-3:" 1
+git -C "$FX" remote set-url origin https://github.com/newcomer/lab-kit
+if grep -q '^gh ' "$ST/calls"; then bad "C-td-3 called gh: it makes no live call"; else ok "C-td-3 made no gh call across every case"; fi
+lab
+verdict "12 passes again once the listings are fresh and name only the owner" "RUNG 12 PASS" 0
 
 # --- the extras: no lab seat, and no cluster beyond local ------------------------
 put sessions.out "[$(seat other-ticker-g1-0 other)]"
@@ -232,7 +252,7 @@ verdict "12 FAILs when marvel is not on PATH" "RUNG 12 FAIL C-td:" 1
 # The check never acts: no mutating verb appears in its code.
 script=$ROOT/lab/check/12-teardown.sh
 if [[ -f $script ]]; then
-  for verb in "marvel stop" "marvel keys revoke" "remove-cluster" "marvel kill" "marvel delete" "bd close" "rm " "git push" "git commit"; do
+  for verb in "marvel stop" "marvel keys revoke" "remove-cluster" "marvel kill" "marvel delete" "bd close" "rm " "gh " "git push" "git commit"; do
     if grep -v -e '^[[:space:]]*#' -e 'fail C-td' "$script" | grep -q -E -e "(^|[;&|(]|do |then )[[:space:]]*$verb|\\\$\\(.*$verb"; then bad "check 12 runs no [$verb]"; else ok "check 12 runs no [$verb]"; fi
   done
 else
@@ -258,7 +278,7 @@ else
   [[ -n $(section Tools) ]] && ok "rung 12 has a Tools section" || bad "rung 12 has no Tools section"
   [[ -n $(section "Expected prompts") ]] && ok "rung 12 has an Expected prompts section" || bad "rung 12 has no Expected prompts section"
   [[ -n $(section "Left in place") ]] && ok "rung 12 has a Left in place section" || bad "rung 12 has no Left in place section"
-  for s in "lab report 12" "collaborator" "lab-keys" "lsof" "marvel stop --teardown" "marvel keys revoke" "marvel config remove-cluster" "just lab check 12"; do
+  for s in "lab report 12" "collaborator" "lab-keys" "lsof" "teardown-start" "gh api" "lab/state/collaborators" "lab/state/invitations" "marvel stop --teardown" "marvel keys revoke" "marvel config remove-cluster" "just lab check 12"; do
     case $body in *"$s"*) ok "rung 12 names $s" ;; *) bad "rung 12 does not name $s" ;; esac
   done
   # the report comes before the collaborator is removed
