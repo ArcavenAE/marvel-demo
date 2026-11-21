@@ -166,11 +166,45 @@ lab 0b
 verdict "0b FAILs when the report holds the file's content" "RUNG 0b FAIL C-r0-b:" 1
 if [[ $OUT == *"RUNG 0b FAIL C-r0-b:"* && $OUT != *"$MARKER"* ]]; then ok "0b FAILs without repeating the content it found"; else bad "0b did not FAIL cleanly: [$OUT]"; fi
 printf '%s\n' "$good" >"$FX/lab/state/0b-denial.txt"
-python3 -I -c 'import json, sys
+# The shipped settings carry the deny in character class form; a plain form is also accepted.
+PROBE_PLAIN='Read(./lab/deny-probe)'
+PROBE_CLASS='Read(./[Ll][Aa][Bb]/[Dd][Ee][Nn][Yy]-[Pp][Rr][Oo][Bb][Ee])'
+OTHER_CLASS='Edit(./[Ll][Aa][Bb]/[Rr][Uu][Nn])'
+# setdeny <entry...>: the settings deny list keeps its other entries and holds exactly these probe entries
+setdeny() {
+  python3 -I -c 'import json, sys
 p = sys.argv[1]
 d = json.load(open(p))
-d["permissions"]["deny"] = [r for r in d["permissions"]["deny"] if r != "Read(./lab/deny-probe)"]
-json.dump(d, open(p, "w"))' "$FX/.claude/settings.json"
+probe = ("Read(./lab/deny-probe)", "Read(./[Ll][Aa][Bb]/[Dd][Ee][Nn][Yy]-[Pp][Rr][Oo][Bb][Ee])")
+d["permissions"]["deny"] = [r for r in d["permissions"]["deny"] if r not in probe] + sys.argv[2:]
+json.dump(d, open(p, "w"))' "$FX/.claude/settings.json" "$@"
+}
+quote_report() { printf '%s\n' "Permission to use Read has been denied. The deny rule that matched is $1." >"$FX/lab/state/0b-denial.txt"; }
+
+setdeny "$PROBE_CLASS"
+quote_report "$PROBE_CLASS"
+lab 0b
+verdict "0b passes with the class form in the settings and the class form in the report" "RUNG 0b PASS" 0
+setdeny "$PROBE_PLAIN"
+quote_report "$PROBE_PLAIN"
+lab 0b
+verdict "0b passes with the plain form in the settings and the plain form in the report" "RUNG 0b PASS" 0
+quote_report "$PROBE_CLASS"
+lab 0b
+verdict "0b passes with the plain form in the settings and the class form in the report" "RUNG 0b PASS" 0
+setdeny "$PROBE_CLASS"
+quote_report "$PROBE_PLAIN"
+lab 0b
+verdict "0b passes with the class form in the settings and the plain form in the report" "RUNG 0b PASS" 0
+quote_report "$OTHER_CLASS"
+lab 0b
+verdict "0b FAILs when the report quotes the class form of another rule" "RUNG 0b FAIL C-r0-b:" 1
+setdeny "$OTHER_CLASS"
+quote_report "$PROBE_CLASS"
+lab 0b
+verdict "0b FAILs when the settings hold only the class form of another rule" "RUNG 0b FAIL C-r0-b:" 1
+setdeny
+quote_report "$PROBE_CLASS"
 lab 0b
 verdict "0b FAILs when the deny rule is gone from the settings" "RUNG 0b FAIL C-r0-b:" 1
 
