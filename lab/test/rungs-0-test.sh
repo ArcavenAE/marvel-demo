@@ -363,7 +363,7 @@ for id in 0a 0b 0c 0d 0e 0f 0g; do
 done
 if grep -q -F '`release <name> <tag>`' "$ROOT/lab.lock"; then ok "lab.lock header documents release lines"; else bad "lab.lock header does not document release lines"; fi
 if grep -q -x 'lab/state/' "$ROOT/.gitignore" 2>/dev/null; then ok "lab/state/ is ignored"; else bad "lab/state/ is not in .gitignore"; fi
-pinned=$(grep -c '^digest lab/check/0' "$ROOT/lab.lock" || true)
+pinned=$(grep -c '^digest lab/check/0[a-g]-' "$ROOT/lab.lock" || true)
 expect "the real lab.lock pins exactly the seven install checks" "$pinned" 7
 
 # --- the rung text names the tools and the expected prompts -------------------------
