@@ -17,6 +17,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,7 +31,64 @@ SETTINGS = os.path.join(REPO, ".claude", "settings.json")
 # Built from parts so this file never contains the word it forbids elsewhere.
 NEEDLE = "auto" + "Mode"
 
-REQUIRED_DENY = [
+def cls(rule):
+    """Edit(./lab/run) -> Edit(./[Ll][Aa][Bb]/[Rr][Uu][Nn]): every letter of every
+    path component becomes a character class; `.`, `/`, `-` and `*` stay literal.
+    Bash rules and rules under ~ are not paths of the project and are left as they are."""
+    tool, _, rest = rule.partition("(")
+    spec = rest[:-1]
+    if tool not in ("Edit", "Read") or not spec.startswith("./"):
+        return rule
+    out = []
+    for ch in spec[2:]:
+        out.append("[%s%s]" % (ch.upper(), ch.lower()) if ch.isalpha() else ch)
+    return "%s(./%s)" % (tool, "".join(out))
+
+
+def gi_regex(spec):
+    """The subset of gitignore matching the lab's denies use: literal characters,
+    [...] classes, ?, * (no slash) and ** (anything). Anchored at the project root;
+    a match of a directory also covers what is under it."""
+    i, out = 0, []
+    while i < len(spec):
+        ch = spec[i]
+        if ch == "[":
+            j = spec.index("]", i)
+            out.append(spec[i:j + 1])
+            i = j
+        elif ch == "*" and spec[i:i + 2] == "**":
+            out.append(".*")
+            i += 1
+        elif ch == "*":
+            out.append("[^/]*")
+        elif ch == "?":
+            out.append("[^/]")
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    return re.compile("^" + "".join(out) + "(/.*)?$")
+
+
+def gi_match(rule, path):
+    """Does the deny `Edit(./spec)` match `path` (relative to the project root)?"""
+    spec = rule.partition("(")[2][:-1]
+    assert spec.startswith("./"), rule
+    return bool(gi_regex(spec[2:]).match(path))
+
+
+def alt_case(path):
+    """A mixed-case spelling: letters alternate lower and upper."""
+    out, flip = [], False
+    for ch in path:
+        if ch.isalpha():
+            out.append(ch.upper() if flip else ch.lower())
+            flip = not flip
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+PLAIN_DENY = [
     "Read(~/.ssh/**)",
     "Read(~/.marvel/keys/**)",
     "Read(~/.marvel/ssh_host_ed25519_key)",
@@ -59,6 +117,13 @@ REQUIRED_DENY = [
     "Edit(./lab/justfile)",
     "Edit(./lab/.justfile)",
 ]
+
+# The path denies take the character-class form, so a path spelled in another
+# letter case is still denied; entries that become the same string are kept once.
+REQUIRED_DENY = []
+for _r in PLAIN_DENY:
+    if cls(_r) not in REQUIRED_DENY:
+        REQUIRED_DENY.append(cls(_r))
 
 EXPECTED_ALLOW = [
     "Bash(marvel get:*)",
@@ -792,14 +857,16 @@ def test_round8_denies():
     neither may also appear as an allow."""
     shipped = (load_settings() or {}).get("permissions", {})
     for rule in ("Edit(./lab/report)", "Read(./lab/deny-probe)"):
+        rule = cls(rule)
         record("round 8: the shipped deny list holds %s" % rule, rule in shipped.get("deny", []),
                "deny is %r" % shipped.get("deny"))
         expect_fail("round 8: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
                     mutate=lambda d, r=rule: allow(d).append(r))
-    record("round 8: the shipped deny list has 26 entries", len(shipped.get("deny", [])) == 26,
+    record("round 8: the shipped deny list has 25 entries", len(shipped.get("deny", [])) == 25,
            "count %r" % len(shipped.get("deny", [])))
     # Removing only one of the two leaves C-set-3 FAIL naming the other.
     for rule in ("Edit(./lab/report)", "Read(./lab/deny-probe)"):
+        rule = cls(rule)
         proj = make_project(mutate=lambda d, r=rule: d["permissions"].update(
             {"deny": [x for x in d["permissions"]["deny"] if x != r]}))
         rc, out = check_project(proj)
@@ -823,6 +890,7 @@ def test_justfile_denies():
     in the shipped file, and may not also be an allow."""
     shipped = (load_settings() or {}).get("permissions", {})
     for rule in ("Edit(./lab/mod.just)", "Edit(./lab/justfile)", "Edit(./lab/.justfile)", "Edit(./lab/Justfile)"):
+        rule = cls(rule)
         record("justfile denies: the shipped deny list holds %s" % rule, rule in shipped.get("deny", []),
                "deny is %r" % shipped.get("deny"))
         expect_fail("justfile denies: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
@@ -850,6 +918,7 @@ def test_roots_of_trust():
     for rule in ("Edit(./lab/run)", "Edit(./lab.lock)", "Edit(./lab/check-settings)",
                  "Edit(./lab.just)", "Edit(./justfile)", "Edit(./.claude/settings.json)",
                  "Edit(./.git/config)", "Edit(./.claude/settings.local.json)"):
+        rule = cls(rule)
         record("roots: the shipped deny list holds %s" % rule, rule in shipped.get("deny", []),
                "deny is %r" % shipped.get("deny"))
         expect_fail("roots: %s as an allow fails C-set-2 (allow equal to a deny)" % rule, "C-set-2",
@@ -865,6 +934,69 @@ def test_roots_of_trust():
                  "Read(./.claude/settings.local.json)", "Edit(./.claude/settings.local.json.bak)"):
         expect_pass("roots: control, %s as an allow passes C-set-2" % rule, "C-set-2",
                     mutate=lambda d, r=rule: allow(d).append(r))
+
+
+def test_case_proof():
+    """Every path deny holds whatever letter case the path is spelled in. Claude
+    Code's own matcher is not run; a gitignore matcher in this file stands in for
+    it, and a pattern that matches each spelling is the proof."""
+    shipped = (load_settings() or {}).get("permissions", {})
+    deny_list = shipped.get("deny", [])
+    paths = [
+        ("Edit(./lab/check-settings)", "lab/check-settings"),
+        ("Edit(./lab/run)", "lab/run"),
+        ("Edit(./lab.lock)", "lab.lock"),
+        ("Edit(./lab/HARNESS.md)", "lab/HARNESS.md"),
+        ("Edit(./lab/report)", "lab/report"),
+        ("Edit(./lab/mod.just)", "lab/mod.just"),
+        ("Edit(./lab/justfile)", "lab/justfile"),
+        ("Edit(./lab/.justfile)", "lab/.justfile"),
+        ("Edit(./lab/Justfile)", "lab/Justfile"),
+        ("Edit(./lab.just)", "lab.just"),
+        ("Edit(./justfile)", "justfile"),
+        ("Edit(./.claude/settings.json)", ".claude/settings.json"),
+        ("Edit(./.git/config)", ".git/config"),
+        ("Edit(./.claude/settings.local.json)", ".claude/settings.local.json"),
+        ("Edit(./lab/test/**)", "lab/test/a/b.sh"),
+        ("Read(./lab/deny-probe)", "lab/deny-probe"),
+    ]
+    # The matcher itself first: a wrong matcher would make every line below vacuous.
+    record("matcher: a class matches both cases", gi_match("Edit(./[Rr]un)", "run") and gi_match("Edit(./[Rr]un)", "Run"))
+    record("matcher: a class does not match another letter", not gi_match("Edit(./[Rr]un)", "sun"))
+    record("matcher: a plain pattern does not match another case", not gi_match("Edit(./run)", "RUN"))
+    record("matcher: a longer name does not match", not gi_match("Edit(./[Rr]un)", "runs"))
+    record("matcher: ** crosses directories", gi_match("Edit(./t/**)", "t/a/b"))
+    # Every path deny is held in the class form, and matches each spelling.
+    for rule, path in paths:
+        want = cls(rule)
+        record("case proof: the shipped deny list holds %s" % want, want in deny_list, "deny is %r" % deny_list)
+        for label, spelling in (("plain", path), ("upper", path.upper()), ("mixed", alt_case(path)),
+                                ("directory in another case", "/".join([path.split("/")[0].upper()] + path.split("/")[1:]))):
+            record("case proof: %s matches %s spelling %s" % (want, label, spelling), gi_match(want, spelling))
+    # The literal expected form, written out once, not computed by cls().
+    record("case proof: the justfile deny is written out",
+           "Edit(./[Ll][Aa][Bb]/[Jj][Uu][Ss][Tt][Ff][Ii][Ll][Ee])" in deny_list)
+    # A look-alike is not matched.
+    record("case proof: lab/runs is not denied by the lab/run class", not gi_match(cls("Edit(./lab/run)"), "lab/runs"))
+    record("case proof: lab/tests is not denied by the lab/test/** class", not gi_match(cls("Edit(./lab/test/**)"), "lab/tests"))
+    # check-settings requires the class forms: plain-only and last-component-only both FAIL C-set-3.
+    def plain_only(d):
+        d["permissions"]["deny"] = [r for r in d["permissions"]["deny"] if r not in REQUIRED_DENY or not r.startswith(("Edit(", "Read(./"))] \
+            + [p for p, _ in paths]
+    expect_fail("case proof: plain path denies alone fail C-set-3", "C-set-3", mutate=plain_only)
+    def last_component_only(d):
+        deny_new = []
+        for r in d["permissions"]["deny"]:
+            if r == cls("Edit(./lab/Justfile)"):
+                r = "Edit(./lab/[Jj][Uu][Ss][Tt][Ff][Ii][Ll][Ee])"
+            deny_new.append(r)
+        d["permissions"]["deny"] = deny_new
+    expect_fail("case proof: a class on the last component only fails C-set-3", "C-set-3", mutate=last_component_only)
+    proj = make_project(mutate=last_component_only)
+    rc, out = check_project(proj)
+    line = [l for l in (out or "").splitlines() if l.startswith("C-set-3")]
+    record("case proof: the C-set-3 line names the missing class form",
+           rc == 1 and bool(line) and cls("Edit(./lab/Justfile)") in line[0], "line %r" % line)
 
 
 def test_no_allowed_bash_writes_a_root():
@@ -1012,7 +1144,7 @@ def main():
                test_input_errors, test_cset5, test_no_writes_to_home,
                test_failopen_first_word, test_allowlist, test_tool_allowlist, test_key_allowlist, test_no_commands,
                test_lab_scope, test_parsed_keys, test_override_files, test_fold_override_names,
-               test_round8_denies, test_justfile_denies, test_roots_of_trust,
+               test_round8_denies, test_justfile_denies, test_roots_of_trust, test_case_proof,
                test_no_allowed_bash_writes_a_root, test_failopen_types, test_failopen_commands,
                test_failopen_unreadable, test_failopen_user_settings):
         fn()

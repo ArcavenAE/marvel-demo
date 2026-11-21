@@ -158,10 +158,32 @@ if [[ -f $ROOT/lab/HARNESS.md ]]; then
   expect_has "roots: HARNESS.md has a roots of trust section" "$harness" "## The roots of trust"
   roots_text=$(awk '/^## The roots of trust/{f=1;next} /^## /{f=0} f' "$ROOT/lab/HARNESS.md")
   settings=$(cat "$ROOT/.claude/settings.json")
+  # The deny is written with a character class per letter, so the agent's
+  # spelling of the path in another case is denied too.
+  classed() { # <path> -> every letter as [Xx]
+    local in=$1 out="" i ch
+    for ((i = 0; i < ${#in}; i++)); do
+      ch=${in:i:1}
+      case $ch in
+        [A-Za-z]) out="$out[$(printf '%s' "$ch" | tr '[:lower:]' '[:upper:]')$(printf '%s' "$ch" | tr '[:upper:]' '[:lower:]')]" ;;
+        *) out="$out$ch" ;;
+      esac
+    done
+    printf '%s' "$out"
+  }
   for r in lab/run lab.lock lab.just justfile .claude/settings.json lab/check-settings .git/config .claude/settings.local.json; do
     expect_has "roots: the section names $r" "$roots_text" "\`$r\`"
-    expect_has "roots: settings.json denies Edit on $r" "$settings" "\"Edit(./$r)\""
+    expect_has "roots: settings.json denies Edit on $r in character class form" "$settings" "\"Edit(./$(classed "$r"))\""
   done
+  expect_has "roots: the section says the denies use a character class per letter" "$roots_text" "character class"
+  # The instruction text the agent can edit is named, and granted nothing.
+  instr_text=$(awk '/^## Instruction text/{f=1;next} /^## /{f=0} f' "$ROOT/lab/HARNESS.md")
+  expect_has "instruction text: HARNESS.md has the section" "$harness" "## Instruction text"
+  expect_has "instruction text: names lab/rung/*.md" "$instr_text" "\`lab/rung/*.md\`"
+  expect_has "instruction text: names a nested lab/CLAUDE.md" "$instr_text" "\`lab/CLAUDE.md\`"
+  expect_has "instruction text: the agent can edit it" "$instr_text" "agent can edit"
+  expect_has "instruction text: it grants nothing alone" "$instr_text" "grants nothing"
+  expect_has "instruction text: no pinned file reads or runs it" "$instr_text" "no pinned file reads or runs"
 else
   bad "roots: lab/HARNESS.md is missing"
 fi
