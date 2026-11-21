@@ -328,8 +328,8 @@ else
   [[ -n $(section "Left in place") ]] && ok "rung 12 has a Left in place section" || bad "rung 12 has no Left in place section"
   case $body in *"RUNG 12 FAIL C-td-3"*) ok "rung 12 says the posted report is expected to read RUNG 12 FAIL C-td-3" ;; *) bad "rung 12 does not say the posted report is expected to read RUNG 12 FAIL C-td-3" ;; esac
   case $body in *"may list what is still left"*|*"shows the first check still failing"*) bad "rung 12 keeps the old report wording" ;; *) ok "rung 12 drops the old report wording" ;; esac
-  case $body in *"you, not the agent, run"*"after the stop"*) ok "rung 12 has the human run the report and the check after the stop" ;; *) bad "rung 12 does not have the human run the report and the check after the stop" ;; esac
-  case $body in *"If you ask the agent"*) bad "rung 12 still offers to have the agent run the report" ;; *) ok "rung 12 no longer offers to have the agent run the report" ;; esac
+  case $body in *"you or the agent may run"*"just lab report 12"*"just lab check 12"*"after the stop"*) ok "rung 12 says you or the agent may run the report and the check after the stop" ;; *) bad "rung 12 does not say you or the agent may run the report and the check after the stop" ;; esac
+  case $body in *"including the one the agent runs in"*|*"you, not the agent"*) bad "rung 12 still claims the stop ends the agent's seat or bars the agent" ;; *) ok "rung 12 no longer claims the stop ends the agent's seat" ;; esac
   # order of the steps: everything else before the report, the report before the collaborator
   firstpos() { local rest=${body%%"$1"*}; [[ $rest != "$body" ]] && echo "${#rest}" || echo -1; }
   prev=-1
