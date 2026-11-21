@@ -20,7 +20,9 @@ above lab/) and prints one line per check, then a count:
            wildcard allow; and no
            settings.local.json or .mcp.json anywhere in the tree (either
            would override or extend the shipped file)
-  C-set-3  every required deny is present
+  C-set-3  every required deny is present, the path denies in character
+           class form (every letter of every component as [Xx]) so another
+           letter case of the same path is denied too
   C-set-4  every Read, Edit or Write allow starts with ./lab/ and has no
            parent segment; no Bash allow names a path outside the project;
            the settings run no commands at all (no hooks, statusLine or
@@ -50,7 +52,7 @@ USAGE = ("usage: check-settings [--project DIR | --user-snapshot FILE | "
 # Built from parts so this file does not contain the word it scans for.
 NEEDLE = ("auto" + "Mode").encode()
 
-REQUIRED_DENY = [
+PLAIN_DENY = [
     "Read(~/.ssh/**)",
     "Read(~/.marvel/keys/**)",
     "Read(~/.marvel/ssh_host_ed25519_key)",
@@ -91,6 +93,33 @@ REQUIRED_DENY = [
     "Edit(./.claude/settings.local.json)",
     "Read(./lab/deny-probe)",
 ]
+
+
+def case_proof(rule):
+    """Edit(./lab/run) -> Edit(./[Ll][Aa][Bb]/[Rr][Uu][Nn]).
+
+    Claude Code matches a path rule the way gitignore does, and the volume the
+    lab runs on can be case-insensitive, so a plain spelling is not enough: the
+    agent could name the same file in another letter case. Every letter of every
+    path component becomes a character class; `.`, `/`, `-` and `*` stay as they
+    are. Bash rules and rules under ~ are not paths of this project and pass
+    through unchanged."""
+    tool, _, rest = rule.partition("(")
+    spec = rest[:-1]
+    if tool not in ("Edit", "Read") or not spec.startswith("./"):
+        return rule
+    out = []
+    for ch in spec[2:]:
+        out.append("[%s%s]" % (ch.upper(), ch.lower()) if ch.isalpha() else ch)
+    return "%s(./%s)" % (tool, "".join(out))
+
+
+# The denies check_3 requires. Entries that become the same string once
+# case-proofed (lab/justfile and lab/Justfile) are kept once.
+REQUIRED_DENY = []
+for _rule in PLAIN_DENY:
+    if case_proof(_rule) not in REQUIRED_DENY:
+        REQUIRED_DENY.append(case_proof(_rule))
 
 # The Bash lines the lab grants, and nothing else. A Bash allow passes only if
 # its words start with one of these prefixes, spelled exactly (case, quoting

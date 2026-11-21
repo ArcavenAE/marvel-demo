@@ -84,7 +84,10 @@ last is fresh. `lab/run versions` prints what each pinned tool says now.
 
 The digest check cannot cover the files that do the checking or choose what
 runs, so each is a root of trust and the agent may not edit it. Each has an
-`Edit` deny in `.claude/settings.json` that `lab/check-settings` requires:
+`Edit` deny in `.claude/settings.json` that `lab/check-settings` requires. Each
+deny is written with a character class per letter (`[Rr][Uu][Nn]` for `run`), so
+the same path spelled in another letter case, on a volume that ignores case, is
+denied too:
 
 - `lab/run`: the harness that checks every digest.
 - `lab.lock`: the digests and pins the harness compares against.
@@ -95,7 +98,21 @@ runs, so each is a root of trust and the agent may not edit it. Each has an
 - `.git/config`: holds `origin`, the repo a report posts to.
 - `.claude/settings.local.json`: read for permissions beside the shared file.
 
+One gap is left by the class form. On APFS, case folding maps some characters
+that are not ASCII letters onto ASCII ones: the Kelvin sign (U+212A) onto `k`,
+and the long s (U+017F) onto `s`. A class like `[Kk]` does not match them, so a
+name spelled with one could reach a file the deny does not name. The settings
+stay ASCII and the class is not widened; this line is the record of the gap.
+
 The same files stay out of reach of an allowed command: the `just lab` recipes
 only print a rung file, run a pinned file through `lab/run`, or run `lab/run`,
 and none redirects into a root. A report's denials file is read only from
 `lab/state/`, never from another path.
+
+## Instruction text
+
+`lab/rung/*.md` and a nested `lab/CLAUDE.md` are text the agent reads as
+instructions, and the agent can edit them, because `Edit(./lab/**)` is allowed.
+Each grants nothing alone: a permission comes only from `.claude/settings.json`,
+and no pinned file reads or runs them. A change to them changes what the agent
+is told, not what it may do.

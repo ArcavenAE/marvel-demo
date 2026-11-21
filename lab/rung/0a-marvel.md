@@ -18,7 +18,7 @@ Install these yourself before the agent starts; this kit does not install them f
 
 ## Expected prompts
 
-The agent's permission list lets it run `marvel get`, `marvel doctor`, `marvel capture` and `marvel events` and the `just lab` recipes without asking. Any other command asks you first.
+The agent's permission list lets it run `marvel get`, `marvel doctor`, `marvel capture` and `marvel events` and the `just lab` recipes without asking. Commands outside this list may ask you first.
 
 - `marvel version` asks. Answer yes; it only prints the version.
 - Claude Code may stop at a first-run menu such as "Teach auto mode about your environment?". Its first option, "1. Yes", is pre-selected, so do not press Enter on it; choose "2. Not now". marvel never answers a menu for you. marvel's first-run guide says the wording of this menu is from notes, not a capture, so the menu you see may differ.
