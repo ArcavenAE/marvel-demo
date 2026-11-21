@@ -9,9 +9,10 @@
 #
 #   C-td-1  no process listens on a lab port (LAB_PORTS, default 4222, the bus)
 #   C-td-2  no key recorded in lab/state/lab-keys is in ~/.marvel/authorized_keys
-#   C-td-3  your saved listings show no collaborator but the owner and no invitation
 #   C-td-4  no session is left in the lab workspace (a stopped daemon counts)
 #   C-td-5  marvel config lists no cluster but local
+#   C-td-3  your saved listings show no collaborator but the owner and no invitation
+#           (runs last, so a report posted before the collaborator is removed reads C-td-3)
 
 set -uo pipefail
 
@@ -106,6 +107,32 @@ if [[ -s $AK ]]; then
   done
 fi
 
+# C-td-4: no seat is left in the lab workspace. A stopped daemon has none.
+bounded "$WAIT" marvel get sessions -o json
+if [[ $B_RC -ne 0 ]]; then
+  case $B_OUT in
+    *"connect to daemon"*) ;;
+    *) fail C-td-4 "marvel get sessions failed (exit $B_RC)" ;;
+  esac
+else
+  left=$(printf '%s\n' "$B_OUT" | sed -n '/^\[/,$p' | python3 -I -c 'import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(3)
+print(" ".join(s.get("Name", "") for s in d if s.get("Workspace") == "lab"))' 2>/dev/null) || fail C-td-4 "could not read the marvel get sessions answer"
+  [[ -z $left ]] || fail C-td-4 "seats are still running in the lab workspace: $left"
+fi
+
+# C-td-5: no cluster but local.
+bounded "$WAIT" marvel config list
+[[ $B_RC -eq 0 ]] || fail C-td-5 "marvel config list failed (exit $B_RC)"
+rows=$(printf '%s\n' "$B_OUT" | awk 'NR > 1 { n = ($1 == "*") ? $2 : $1; if (n != "") print n }')
+[[ -n $rows ]] || fail C-td-5 "marvel config list printed no cluster, not even local"
+other=$(printf '%s\n' "$rows" | grep -v -x local | tr '\n' ' ' || true)
+[[ -z ${other// /} ]] || fail C-td-5 "clusters beyond local are still configured: $other: run marvel config remove-cluster"
+# C-td-3 runs last: the report is posted before the collaborator is removed, so the
+# posted line reads C-td-3 and shows that C-td-1, 2, 4 and 5 already passed.
 # C-td-3: the repository has no collaborator but its owner, and no pending
 # invitation. The check calls no gh and dials nothing: it reads two listings you
 # saved with gh after the teardown started (lab/state/teardown-start is the
@@ -145,28 +172,4 @@ pending=$(cat "$INVITE" | tr '\n' ' ')
 set +f
 [[ -z ${pending//[[:space:]]/} ]] || fail C-td-3 "an invitation is still pending for: $pending"
 
-# C-td-4: no seat is left in the lab workspace. A stopped daemon has none.
-bounded "$WAIT" marvel get sessions -o json
-if [[ $B_RC -ne 0 ]]; then
-  case $B_OUT in
-    *"connect to daemon"*) ;;
-    *) fail C-td-4 "marvel get sessions failed (exit $B_RC)" ;;
-  esac
-else
-  left=$(printf '%s\n' "$B_OUT" | sed -n '/^\[/,$p' | python3 -I -c 'import json, sys
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(3)
-print(" ".join(s.get("Name", "") for s in d if s.get("Workspace") == "lab"))' 2>/dev/null) || fail C-td-4 "could not read the marvel get sessions answer"
-  [[ -z $left ]] || fail C-td-4 "seats are still running in the lab workspace: $left"
-fi
-
-# C-td-5: no cluster but local.
-bounded "$WAIT" marvel config list
-[[ $B_RC -eq 0 ]] || fail C-td-5 "marvel config list failed (exit $B_RC)"
-rows=$(printf '%s\n' "$B_OUT" | awk 'NR > 1 { n = ($1 == "*") ? $2 : $1; if (n != "") print n }')
-[[ -n $rows ]] || fail C-td-5 "marvel config list printed no cluster, not even local"
-other=$(printf '%s\n' "$rows" | grep -v -x local | tr '\n' ' ' || true)
-[[ -z ${other// /} ]] || fail C-td-5 "clusters beyond local are still configured: $other: run marvel config remove-cluster"
 pass
