@@ -75,7 +75,7 @@ tmux -L marvel-f04cd3dc attach -t %1"
   put capture.out ""
   put bus.out "managed:  true
 ready:    yes
-leaf:     none
+leaf:     n/a (no hub)
 url:      nats://127.0.0.1:4222
 listen:   127.0.0.1:4222"
   put events.out "TIME      SEV   KIND                 SESSION        MESSAGE"
@@ -214,6 +214,7 @@ printf '%s\n' "$NONCE5" >"$FX/lab/state/nonce-05"
 put capture.out "$NONCE5"
 lab 05
 verdict "05 passes when capture shows the injected nonce" "RUNG 05 PASS" 0
+if [[ $OUT == *"RUNG 05 PASS"* && ! -e $ST/inject.called ]]; then ok "05 never runs marvel inject: injecting is the human's step"; else bad "05 ran marvel inject, or did not pass"; fi
 put capture.out "other text"
 lab 05
 verdict "05 FAILs when capture does not show the nonce" "RUNG 05 FAIL C-r5:" 1
@@ -243,7 +244,9 @@ SECRET6=pw-06-secret-value-31ac
 PASSFILE=$FX/seat.pass
 printf '%s' "$SECRET6" >"$PASSFILE"
 lab 06
-if [[ $OUT == *"RUNG 06 PASS"* && $OUT != *"$SECRET6"* ]] && ! grep -rqF "$SECRET6" "$FX/lab/state" "$LOGS" "$ST" 2>/dev/null; then
+grc=0
+grep -rqF "$SECRET6" "$FX/lab/state" "$LOGS" "$ST" 2>/dev/null || grc=$?
+if [[ $OUT == *"RUNG 06 PASS"* && $OUT != *"$SECRET6"* && $grc -eq 1 ]]; then
   ok "06 holds the seat's password in no report, state file or log"
 else
   bad "06 did not pass cleanly, or the password value is in its output or a file: [$OUT]"
@@ -251,12 +254,12 @@ fi
 unset PASSFILE
 put bus.out "managed:  true
 ready:    no
-leaf:     none"
+leaf:     n/a (no hub)"
 lab 06
 verdict "06 FAILs when the bus is not ready" "RUNG 06 FAIL C-r6:" 1
 put bus.out "managed:  true
 ready:    yes
-leaf:     none"
+leaf:     n/a (no hub)"
 sessions "$(seat $PING ping running 5101 %1 1)" "$(seat $PONG pong pending 0 %2 1)"
 lab 06
 verdict "06 FAILs when the pong seat is not running" "RUNG 06 FAIL C-r6:" 1
@@ -272,13 +275,15 @@ relay_ok
 touch -t 202001010000 "$LOGS/relay/$PONG.log"
 lab 06
 verdict "06 FAILs on a stale pong log, so an old exchange is not a pass" "RUNG 06 FAIL C-r6:" 1
-relay_ok
-put bus.out "managed:  true
+for leafval in up unenrolled detached down unknown; do
+  relay_ok
+  put bus.out "managed:  true
 ready:    yes
-leaf:     up
+leaf:     $leafval
 listen:   127.0.0.1:4222"
-lab 06
-verdict "06 FAILs when the bus has a hub leaf link" "RUNG 06 FAIL C-r6:" 1
+  lab 06
+  verdict "06 FAILs when the leaf reads $leafval, not n/a (no hub)" "RUNG 06 FAIL C-r6:" 1
+done
 
 # --- 07 scheduled role ----------------------------------------------------------
 fixture r07
@@ -308,7 +313,7 @@ verdict "07 passes across midnight" "RUNG 07 PASS" 0
 
 # --- 08 bd round trip -----------------------------------------------------------
 fixture r08
-ISSUE='{"id":"orc-u6d","title":"lab note from relay seat","status":"%s"}'
+ISSUE='{"id":"orc-u6d","title":"lab note from ticker seat bdt-ticker-g1-0","status":"%s"}'
 bdstate() {
   put bd.list.json "[$(printf "$ISSUE" "$1")]"
   put bd.show.json "[$(printf "$ISSUE" "$1")]"
@@ -325,6 +330,9 @@ verdict "08 FAILs when no seat filed an issue" "RUNG 08 FAIL C-r8:" 1
 put bd.list.json '[{"id":"orc-zz1","title":"an unrelated issue","status":"closed"}]'
 lab 08
 verdict "08 FAILs when the only issue is not the seat's" "RUNG 08 FAIL C-r8:" 1
+put bd.list.json '[{"id":"orc-zz2","title":"lab note from relay seat","status":"closed"}]'
+lab 08
+verdict "08 FAILs on a lookalike title: the match is the marker the bd workload writes" "RUNG 08 FAIL C-r8:" 1
 
 # --- 09 rollback and upgrade ----------------------------------------------------
 fixture r09
@@ -344,6 +352,9 @@ verdict "09 passes when the daemon re-exec'd in place and the seats stayed the s
 sessions "$(seat $TICKER0 ticker running 4999 %1 1)"
 lab 09
 verdict "09 FAILs when a seat's process changed across the re-exec" "RUNG 09 FAIL C-r9:" 1
+sessions "$(seat $TICKER0 ticker running 4101 %9 1)"
+lab 09
+verdict "09 FAILs when a seat's pane changed across the re-exec" "RUNG 09 FAIL C-r9:" 1
 sessions "$(seat ticker-ticker-g1-7 ticker running 4101 %1 1)"
 lab 09
 verdict "09 FAILs when a session name changed across the re-exec" "RUNG 09 FAIL C-r9:" 1
@@ -363,6 +374,62 @@ ticks "$T" $TICKER0 1 1 2 v1
 ticks "$T" $TICKER0 1 3 4 v2
 lab 09
 verdict "09 FAILs when the ticker is still on v2" "RUNG 09 FAIL C-r9:" 1
+
+# --- the lock and the instructions ----------------------------------------------
+# Every check is pinned in the real lab.lock, and every rung has instructions
+# that `just lab rung N` prints, with Tools and Expected prompts sections.
+rungfile() { ls "$ROOT"/lab/rung/"$1"-*.md 2>/dev/null | head -1 || true; }
+section() { awk -v h="## $2" '$0 == h {on=1; next} /^## /{on=0} on' "$1"; }
+for id in 01 02 03 04 05 06 07 08 09; do
+  want=$(LAB_ROOT=$ROOT "$ROOT/lab/run" digests | awk -v id="$id" '$2 ~ "lab/check/"id"-" {print $0}')
+  if [[ -z $want ]]; then bad "rung $id has a check script"; elif grep -q -F -x "$want" "$ROOT/lab.lock"; then ok "rung $id check is pinned in the real lab.lock"; else bad "rung $id check is not pinned in the real lab.lock"; fi
+  md=$(rungfile "$id")
+  if [[ -z $md ]]; then bad "rung $id has instructions"; bad "rung $id instructions are printed by just lab rung"; bad "rung $id has a Tools section"; bad "rung $id has an Expected prompts section"; continue; fi
+  if [[ -s $md ]] && ! grep -q '^RUNG ' "$md"; then ok "rung $id instructions exist and hold no verdict line"; else bad "rung $id instructions are empty or hold a verdict line"; fi
+  if command -v just >/dev/null 2>&1; then
+    printed=$(cd "$ROOT" && just lab rung "$id" 2>&1) || printed="just failed"
+    if [[ $printed == "$(cat "$md")" ]]; then ok "rung $id instructions are printed by just lab rung"; else bad "rung $id instructions differ from just lab rung output"; fi
+  else
+    bad "just is not on PATH, so rung $id's printout was not tested"
+  fi
+  if [[ -n $(section "$md" Tools) ]]; then ok "rung $id has a Tools section"; else bad "rung $id has no Tools section"; fi
+  if [[ -n $(section "$md" "Expected prompts") ]]; then ok "rung $id has an Expected prompts section"; else bad "rung $id has no Expected prompts section"; fi
+done
+# has <rung> <section or ALL> <string...>: the rung file (or one section) names each string
+has() {
+  local id=$1 sec=$2 f s body
+  shift 2
+  f=$(rungfile "$id")
+  if [[ -z $f ]]; then bad "rung $id text exists"; return; fi
+  if [[ $sec == ALL ]]; then body=$(cat "$f"); else body=$(section "$f" "$sec"); fi
+  for s in "$@"; do
+    case $body in *"$s"*) ok "rung $id $sec names $s" ;; *) bad "rung $id $sec does not name $s" ;; esac
+  done
+}
+has 01 ALL "marvel work" "ticker"
+has 02 ALL "marvel attach" "--print" "nonce-02" "detach"
+has 03 ALL "marvel scale"
+has 04 ALL "marvel shift" "--role ticker" "handoff"
+has 05 ALL "marvel inject" "nonce-05" "marvel capture"
+has 05 "Expected prompts" "marvel inject"
+has 06 ALL "DIRECTOR_NATS_PASS_FILE" "agent.lab.relay" "nats" "marvel work"
+has 07 ALL "marvel events" "cadence.slot-opened"
+has 08 ALL "bd" "lab note from ticker seat"
+has 08 "Expected prompts" "bd close"
+has 09 ALL "marvel upgrade --daemon" "marvel daemon reexec" "v2"
+has 02 "Expected prompts" "marvel attach"
+has 03 "Expected prompts" "marvel scale"
+has 04 "Expected prompts" "marvel shift"
+f05=$(rungfile 05)
+case $(section "${f05:-/dev/null}" "Expected prompts") in *"You run"*|*"you run"*) ok "05 makes inject a step you run, not one the agent runs" ;; *) bad "05 does not say inject is a step you run" ;; esac
+pinned=$(grep -c '^digest lab/check/0[1-9]-' "$ROOT/lab.lock" || true)
+expect "the real lab.lock pins exactly the nine ladder checks" "$pinned" 9
+userpath="/Use""rs/"
+emdash=$'\xe2\x80\x94'
+for f in "$ROOT"/lab/check/0[1-9]-*.sh "$ROOT"/lab/rung/0[1-9]-*.md; do
+  [[ -f $f ]] || continue
+  if grep -q -e "$userpath" -e "$emdash" "$f"; then bad "${f#"$ROOT"/} has a user path or an em dash"; else ok "${f#"$ROOT"/} has no user path or em dash"; fi
+done
 
 printf '\n%s assertions, %s failed\n' "$n" "$fails"
 [[ $fails -eq 0 ]] || exit 1

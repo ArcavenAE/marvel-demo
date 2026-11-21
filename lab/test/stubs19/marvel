@@ -8,6 +8,7 @@ case "$1" in
       *" --print "*) cat "$S/attach.out" ;;
       *) echo bare >"$S/attach.bare"; exit 3 ;;
     esac ;;
+  inject) echo "$*" >"$S/inject.called" ;;
   capture) cat "$S/capture.out" ;;
   bus) cat "$S/bus.out" ;;
   events)

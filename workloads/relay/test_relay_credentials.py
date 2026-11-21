@@ -15,9 +15,15 @@ records what it was called with. No daemon, no bus, no network.
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
-import tomllib
 import unittest
+
+try:
+    import tomllib
+except ImportError:
+    sys.stderr.write("test_relay_credentials.py needs Python 3.11 or newer (tomllib); this is %s\n" % sys.version.split()[0])
+    sys.exit(2)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SECRET = "pw-7c1e55a0-secret"
