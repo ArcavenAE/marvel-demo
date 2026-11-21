@@ -330,6 +330,7 @@ else
   case $body in *"may list what is still left"*|*"shows the first check still failing"*) bad "rung 12 keeps the old report wording" ;; *) ok "rung 12 drops the old report wording" ;; esac
   case $body in *"you or the agent may run"*"just lab report 12"*"just lab check 12"*"after the stop"*) ok "rung 12 says you or the agent may run the report and the check after the stop" ;; *) bad "rung 12 does not say you or the agent may run the report and the check after the stop" ;; esac
   case $body in *"including the one the agent runs in"*|*"you, not the agent"*) bad "rung 12 still claims the stop ends the agent's seat or bars the agent" ;; *) ok "rung 12 no longer claims the stop ends the agent's seat" ;; esac
+  case $body in *"You run every command here yourself"*) bad "rung 12 still says you run every command yourself, which the allow-listed report and check contradict" ;; *) ok "rung 12 does not say you run every command yourself" ;; esac
   # order of the steps: everything else before the report, the report before the collaborator
   firstpos() { local rest=${body%%"$1"*}; [[ $rest != "$body" ]] && echo "${#rest}" || echo -1; }
   prev=-1
