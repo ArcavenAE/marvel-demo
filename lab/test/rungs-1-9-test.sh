@@ -90,6 +90,7 @@ daemon  1.2.3 (alpha) commit aaaa111 pid 900 started 2026-11-21T03:40:48Z"
 lab() {
   OUT=$(env -i HOME="$HM" TMPDIR="$WORK" PATH="$FX/bin:/usr/bin:/bin" \
     LAB_ROOT="$FX" LABT_STATE="$ST" LAB_WAIT="${LAB_WAIT:-3}" LAB_WAIT_CADENCE="${LAB_WAIT_CADENCE:-2}" \
+    ${PASSFILE:+DIRECTOR_NATS_PASS_FILE="$PASSFILE"} ${PASSFILE:+DIRECTOR_NATS_USER=relay} \
     "$FX/lab/run" check "$1" 2>&1) && RC=0 || RC=$?
 }
 
@@ -237,6 +238,17 @@ relay_ok() {
 relay_ok
 lab 06
 verdict "06 passes on a live exchange read from the pong seat's log" "RUNG 06 PASS" 0
+# The seat's password is in its environment's pass file. No report, log or file the rung leaves may hold it.
+SECRET6=pw-06-secret-value-31ac
+PASSFILE=$FX/seat.pass
+printf '%s' "$SECRET6" >"$PASSFILE"
+lab 06
+if [[ $OUT == *"RUNG 06 PASS"* && $OUT != *"$SECRET6"* ]] && ! grep -rqF "$SECRET6" "$FX/lab/state" "$LOGS" "$ST" 2>/dev/null; then
+  ok "06 holds the seat's password in no report, state file or log"
+else
+  bad "06 did not pass cleanly, or the password value is in its output or a file: [$OUT]"
+fi
+unset PASSFILE
 put bus.out "managed:  true
 ready:    no
 leaf:     none"
