@@ -332,6 +332,38 @@ if grep -q -x 'lab/state/' "$ROOT/.gitignore" 2>/dev/null; then ok "lab/state/ i
 pinned=$(grep -c '^digest lab/check/0' "$ROOT/lab.lock" || true)
 expect "the real lab.lock pins exactly the seven install checks" "$pinned" 7
 
+# --- the rung text names the tools and the expected prompts -------------------------
+# Each rung file has a "## Tools" and a "## Expected prompts" section, and the
+# tools a newcomer must have by that rung are named in the right file.
+rungtext() { # <id> <required strings...>
+  local id=$1 f s t p
+  shift
+  f=$(ls "$ROOT"/lab/rung/"$id"-*.md 2>/dev/null | head -1 || true)
+  if [[ -z $f ]]; then bad "rung $id text exists"; return; fi
+  t=$(awk '/^## Tools$/{on=1;next} /^## /{on=0} on' "$f")
+  p=$(awk '/^## Expected prompts$/{on=1;next} /^## /{on=0} on' "$f")
+  if [[ -n $t ]]; then ok "rung $id has a Tools section"; else bad "rung $id has no Tools section"; fi
+  if [[ -n $p ]]; then ok "rung $id has an Expected prompts section"; else bad "rung $id has no Expected prompts section"; fi
+  for s in "$@"; do
+    case $t in *"$s"*) ok "rung $id Tools names $s" ;; *) bad "rung $id Tools does not name $s" ;; esac
+  done
+}
+rungtext 0a "Homebrew" "Command Line Tools" "brew tap arcavenae/tap" "marvel" "tmux" "3.5" "marvel daemon" "just" "git" "gh auth login" "Claude Code"
+rungtext 0b "Claude Code" "python3"
+rungtext 0c "caffeinate"
+rungtext 0d "nats-server" "config.yaml" "600" "nats"
+rungtext 0e "director-install"
+rungtext 0f "bd"
+rungtext 0g "just"
+f0a=$(ls "$ROOT"/lab/rung/0a-*.md 2>/dev/null | head -1 || true)
+if [[ -n $f0a ]] && grep -q -F 'marvel daemon &' "$f0a"; then ok "0a gives the daemon start command"; else bad "0a does not give the daemon start command"; fi
+f0c=$(ls "$ROOT"/lab/rung/0c-*.md 2>/dev/null | head -1 || true)
+p0c=$(awk '/^## Expected prompts$/{on=1;next} /^## /{on=0} on' "${f0c:-/dev/null}")
+case $p0c in *"marvel kill"*) ok "0c lists the kill prompt" ;; *) bad "0c does not list the kill prompt" ;; esac
+f0f=$(ls "$ROOT"/lab/rung/0f-*.md 2>/dev/null | head -1 || true)
+p0f=$(awk '/^## Expected prompts$/{on=1;next} /^## /{on=0} on' "${f0f:-/dev/null}")
+case $p0f in *"bd create"*"bd close"*|*"bd close"*"bd create"*) ok "0f lists the bd create and bd close prompts" ;; *) bad "0f does not list the bd create and bd close prompts" ;; esac
+
 # --- no private or machine-specific text in the new files --------------------------
 userpath="/Use""rs/"
 emdash=$'\xe2\x80\x94'
