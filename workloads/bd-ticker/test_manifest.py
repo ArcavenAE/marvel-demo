@@ -25,10 +25,23 @@ MARKER = "lab note from ticker seat"
 LABEL = "lab-ticker-note"
 SESSION = "bd-ticker-ticker-g1-0"
 
+# The stub keeps the titles of what was created, so a later `bd list` run by a
+# restarted seat on a fresh home sees the issue the first run filed.
 STUB = """#!/bin/sh
 echo "$*" >> "$STUB_DIR/bd.log"
 case "$1" in
-  create) echo "orc-abc" ;;
+  create) printf '%s\\n' "$2" >> "$STUB_DIR/titles"; echo "orc-abc" ;;
+  list)
+    printf '['
+    sep=""
+    if [ -f "$STUB_DIR/titles" ]; then
+      while IFS= read -r t; do
+        printf '%s{"id":"orc-abc","title":"%s","status":"open","labels":["lab","lab-ticker-note"]}' "$sep" "$t"
+        sep=","
+      done < "$STUB_DIR/titles"
+    fi
+    printf ']\\n'
+    ;;
 esac
 exit 0
 """
@@ -50,16 +63,20 @@ def script():
 class Seat:
     """The role's script run to its end, with the stub bd on PATH (or without it)."""
 
-    def __init__(self, test, ticks=1, with_bd=True, again=None):
-        # again: a Seat whose home and stub directory this run reuses, as a restart of the same session does
+    def __init__(self, test, ticks=1, with_bd=True, again=None, fresh_home=False):
+        # again: a Seat whose stub directory (the bd state) this run reuses, and whose home too unless
+        # fresh_home is set: a restart reuses the home only where the seat's files survive, so the
+        # fresh-home case is the one that matters.
         if again is None:
             self.root = tempfile.mkdtemp(prefix="bd-ticker.")
             test.addCleanup(shutil.rmtree, self.root, True)
+            homename = "home"
         else:
             self.root = again.root
+            homename = "home2" if fresh_home else "home"
         self.stub = os.path.join(self.root, "stub")
         self.bin = os.path.join(self.root, "bin")
-        self.home = os.path.join(self.root, "home")
+        self.home = os.path.join(self.root, homename)
         for d in (self.stub, self.bin, self.home):
             if not os.path.isdir(d):
                 os.mkdir(d)
@@ -128,6 +145,18 @@ class Behavior(unittest.TestCase):
         Seat(self, ticks=2, again=first)
         creates = [c for c in first.bd_calls() if c.startswith("create")]
         self.assertEqual(len(creates), 1, "bd calls over two runs: %r" % first.bd_calls())
+
+    def test_a_restart_on_a_fresh_home_asks_bd_and_files_no_second_issue(self):
+        # a record in the seat's own home does not survive every restart, so the seat asks bd
+        # whether its session already filed an issue with the marker label
+        first = Seat(self, ticks=2)
+        second = Seat(self, ticks=2, again=first, fresh_home=True)
+        calls = second.bd_calls()
+        self.assertEqual(len([c for c in calls if c.startswith("create")]), 1, "bd calls over two runs on two homes: %r" % calls)
+        asks = [c for c in calls if c.startswith("list")]
+        self.assertTrue(asks, "the seat never asked bd for an existing issue")
+        self.assertIn("--label %s" % LABEL, asks[-1])
+        self.assertIn("filed", second.log() + first.log())
 
     def test_it_never_closes_or_edits_what_it_filed(self):
         s = Seat(self, ticks=3)
