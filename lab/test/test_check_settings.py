@@ -979,6 +979,15 @@ def test_case_proof():
     # A look-alike is not matched.
     record("case proof: lab/runs is not denied by the lab/run class", not gi_match(cls("Edit(./lab/run)"), "lab/runs"))
     record("case proof: lab/tests is not denied by the lab/test/** class", not gi_match(cls("Edit(./lab/test/**)"), "lab/tests"))
+    # A dot in a name is a literal dot: a matcher that read it as "any character"
+    # would pass every positive above and also match these.
+    for rule, other in (("Edit(./lab.lock)", "labXlock"), ("Edit(./lab.just)", "lab-just"),
+                        ("Edit(./.git/config)", "xgit/config"), ("Edit(./lab/mod.just)", "lab/modXjust"),
+                        ("Edit(./.claude/settings.local.json)", ".claude/settings.localXjson")):
+        record("case proof: %s does not match %s (the dot is literal)" % (cls(rule), other), not gi_match(cls(rule), other))
+    # A trailing slash names the directory of that name, which the pattern covers.
+    record("case proof: lab/run/ is covered by the lab/run class", gi_match(cls("Edit(./lab/run)"), "lab/run/"))
+    record("case proof: lab/RUN/x is covered by the lab/run class (a directory of that name)", gi_match(cls("Edit(./lab/run)"), "lab/RUN/x"))
     # check-settings requires the class forms: plain-only and last-component-only both FAIL C-set-3.
     def plain_only(d):
         d["permissions"]["deny"] = [r for r in d["permissions"]["deny"] if r not in REQUIRED_DENY or not r.startswith(("Edit(", "Read(./"))] \
