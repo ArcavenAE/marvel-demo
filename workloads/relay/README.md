@@ -10,6 +10,8 @@ workload: shell seats and the `nats` command line tool only.
 Both talk to `RELAY_URL`, which defaults to `nats://127.0.0.1:4222`, with `--no-context`
 and no credentials file. They need `nats` on `PATH`.
 
+To run the rung again, first delete the team with `marvel delete team lab/relay`, so the old seats are gone before the new ones start.
+
 ## Expected lines
 
 After three pings, the log of a seat named `relay-ping-g1-0` holds:

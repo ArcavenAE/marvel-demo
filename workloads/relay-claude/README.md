@@ -13,6 +13,8 @@ the quota to spare.
 A session is named `<team>-<role>-g<generation>-<n>`, so the answerer's session is
 `relay-claude-answerer-g1-0` and that is its director address in the team `relay-claude`.
 
+To run the rung again, first delete the team with `marvel delete team lab/relay-claude`. A rerun without it is named `-g1-1`, and the asker still sends to the old `-g1-0` address.
+
 ## What you need
 
 - the `claude` command, logged in;
