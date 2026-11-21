@@ -1,0 +1,51 @@
+# Lab workload relay-claude, rung 10 (optional): relay part (ii), two Claude seats that
+# exchange one director message. `asker` sends "ping 1" to `answerer`; `answerer` replies
+# "pong 1". Each role runs claude through a small wrapper so that the director shim is
+# wired in by the launcher itself: `exec claude ... --strict-mcp-config --mcp-config '<json>'`.
+# There is no per-directory Claude config; the one shim entry travels in the command line,
+# and --strict-mcp-config stops any other entry from loading beside it.
+# This rung spends model quota and is not part of the release gate. See README.md.
+
+[workspace]
+name = "lab"
+
+[[team]]
+name = "relay-claude"
+
+  [[team.role]]
+  name = "answerer"
+  replicas = 1
+  restart_policy = "never"
+  permissions = "plan"
+
+    [team.role.runtime]
+    image = "claude"
+    command = "sh"
+    # marvel passes the claude adapter's flags after the script, so they arrive in "$@".
+    # marvel exports its first message as MARVEL_FIRST_PROMPT for a wrapper command.
+    args = ["-c", '''shim="${DIRECTOR_SHIM_BIN:-director-mcp}"
+mcp=$(printf '{"mcpServers":{"director":{"command":"%s","env":{"DIRECTOR_AGENT_ID":"%s","DIRECTOR_ROLE":"%s","DIRECTOR_TEAM":"%s","DIRECTOR_WORKSPACE":"%s","NATS_URL":"%s"}}}}' \
+  "$shim" "$MARVEL_SESSION" "$DIRECTOR_ROLE" "${DIRECTOR_TEAM:-${MARVEL_TEAM:-relay-claude}}" \
+  "${DIRECTOR_WORKSPACE:-${MARVEL_WORKSPACE:-lab}}" "${NATS_URL:-nats://127.0.0.1:4222}")
+exec claude -n "$MARVEL_SESSION" --strict-mcp-config --mcp-config "$mcp" "$@" ${MARVEL_FIRST_PROMPT:+"$MARVEL_FIRST_PROMPT"}
+''', "relay-claude"]
+    prompt = "Wait for one director message. When it arrives, reply once to its sender with the text pong followed by the number in the message, then say in one line that you replied and stop. Do nothing else."
+    env = { DIRECTOR_ROLE = "answerer" }
+
+  [[team.role]]
+  name = "asker"
+  replicas = 1
+  restart_policy = "never"
+  permissions = "plan"
+
+    [team.role.runtime]
+    image = "claude"
+    command = "sh"
+    args = ["-c", '''shim="${DIRECTOR_SHIM_BIN:-director-mcp}"
+mcp=$(printf '{"mcpServers":{"director":{"command":"%s","env":{"DIRECTOR_AGENT_ID":"%s","DIRECTOR_ROLE":"%s","DIRECTOR_TEAM":"%s","DIRECTOR_WORKSPACE":"%s","NATS_URL":"%s"}}}}' \
+  "$shim" "$MARVEL_SESSION" "$DIRECTOR_ROLE" "${DIRECTOR_TEAM:-${MARVEL_TEAM:-relay-claude}}" \
+  "${DIRECTOR_WORKSPACE:-${MARVEL_WORKSPACE:-lab}}" "${NATS_URL:-nats://127.0.0.1:4222}")
+exec claude -n "$MARVEL_SESSION" --strict-mcp-config --mcp-config "$mcp" "$@" ${MARVEL_FIRST_PROMPT:+"$MARVEL_FIRST_PROMPT"}
+''', "relay-claude"]
+    prompt = "Send one director message to agent://relay-claude/relay-claude-answerer-g1-0 with the text ping 1. Then wait for one reply, say what it was in one line, and stop. Do nothing else."
+    env = { DIRECTOR_ROLE = "asker" }
