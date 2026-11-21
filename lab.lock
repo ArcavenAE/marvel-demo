@@ -21,7 +21,7 @@
 #
 # No versions are pinned yet; they arrive with the rungs.
 digest lab/check/0a-marvel.sh 096065b2699bbdeec2418f4ad7800426ec7d60be82ea9dac56d8e51f530fee0e
-digest lab/check/0b-denial.sh afae7840f9f3b8522b83a24a30384a0396260dc45fb8ed0d6a496ddf7a6b93bc
+digest lab/check/0b-denial.sh a3a6d06e55d86a17e4bbae973c3cbeac5bde6cfd0451ea2eec5389334939a80a
 digest lab/check/0c-keepawake.sh b7c8a9073e333bb8d3a72b11459cc93948a0985cc807cedd02cba65ab8406c34
 digest lab/check/0d-bus.sh 2c207178550414eb3f3c02ae21ed45ae10fd957edd8f47e70102dce88c234cf0
 digest lab/check/0e-director.sh 233a71d3cc8eee84ed723b285f5462baba26199a416d7b0f3057388e417a85fa

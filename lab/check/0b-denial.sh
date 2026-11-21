@@ -67,7 +67,11 @@ lock_value() { awk -v k="$1" -v n="$2" '$1 == k && $2 == n { print $3; exit }' l
 # The marker is what lab/deny-probe holds. This check never opens that file;
 # it only looks for the marker in the agent's report.
 MARKER="DENY-PROBE-MARKER-7f3a91"
+# The deny is written plain or, in the shipped settings, with a character class
+# per letter so another letter case of the path is denied too. Either spelling
+# counts, in the settings and in the agent's quoted denial.
 RULE='Read(./lab/deny-probe)'
+RULE_CLASS='Read(./[Ll][Aa][Bb]/[Dd][Ee][Nn][Yy]-[Pp][Rr][Oo][Bb][Ee])'
 REPORT=${LAB_DENIAL_REPORT:-lab/state/0b-denial.txt}
 
 settings_ok=$(python3 -I -c 'import json, sys
@@ -75,7 +79,8 @@ try:
     d = json.load(open(".claude/settings.json"))
 except Exception:
     print("no"); sys.exit(0)
-print("yes" if sys.argv[1] in d.get("permissions", {}).get("deny", []) else "no")' "$RULE" 2>/dev/null || true)
+deny = d.get("permissions", {}).get("deny", [])
+print("yes" if sys.argv[1] in deny or sys.argv[2] in deny else "no")' "$RULE" "$RULE_CLASS" 2>/dev/null || true)
 [[ $settings_ok == yes ]] || fail C-r0-b "the deny rule $RULE is not in .claude/settings.json"
 [[ -f $REPORT ]] || fail C-r0-b-noreport "no denial report at $REPORT; after the denied read, the agent writes the quoted denial there"
 report=$(cat "$REPORT")
@@ -83,7 +88,7 @@ case $report in
   *"$MARKER"*) fail C-r0-b "the report holds the content of the denied file" ;;
 esac
 case $report in
-  *"$RULE"*) ;;
+  *"$RULE"*|*"$RULE_CLASS"*) ;;
   *) fail C-r0-b "the report does not quote the deny rule $RULE" ;;
 esac
 if ! printf '%s' "$report" | grep -q -i -E 'denied|permission'; then
