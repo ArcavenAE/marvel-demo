@@ -6,6 +6,7 @@ Status: the install checks (rungs 0a to 0g) and the three workloads are in. Rung
 
 ## What is here
 
+- `justfile`, `repos.yaml`, `.beads/config.yaml`, `CLAUDE.md` and `_kos/`: the lab's own orchestrator, where the newcomer works. The `justfile` loads `lab.just` as the `lab` module, `CLAUDE.md` holds the rules for an agent running the ladder, and `repos.yaml` names the workload bundles, which are not shipped yet.
 - `lab/run`, `lab.lock` and `lab.just`: the check harness. `just lab check N` runs the check for rung N and prints one `RUNG` line. `lab/HARNESS.md` describes the rules.
 - `lab/check/` and `lab/rung/`: a check and an instruction file for each install rung, 0a to 0g. `just lab rung N` prints the instructions.
 - `lab/report` and `lab/verify-report`: the report for a rung, and the check on that report.
