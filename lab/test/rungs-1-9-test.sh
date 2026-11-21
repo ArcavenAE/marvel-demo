@@ -75,7 +75,7 @@ tmux -L marvel-f04cd3dc attach -t %1"
   put capture.out ""
   put bus.out "managed:  true
 ready:    yes
-leaf:     n/a (no hub)
+leaf:     n/a
 url:      nats://127.0.0.1:4222
 listen:   127.0.0.1:4222"
   put events.out "TIME      SEV   KIND                 SESSION        MESSAGE"
@@ -254,12 +254,12 @@ fi
 unset PASSFILE
 put bus.out "managed:  true
 ready:    no
-leaf:     n/a (no hub)"
+leaf:     n/a"
 lab 06
 verdict "06 FAILs when the bus is not ready" "RUNG 06 FAIL C-r6:" 1
 put bus.out "managed:  true
 ready:    yes
-leaf:     n/a (no hub)"
+leaf:     n/a"
 sessions "$(seat $PING ping running 5101 %1 1)" "$(seat $PONG pong pending 0 %2 1)"
 lab 06
 verdict "06 FAILs when the pong seat is not running" "RUNG 06 FAIL C-r6:" 1
@@ -282,7 +282,7 @@ ready:    yes
 leaf:     $leafval
 listen:   127.0.0.1:4222"
   lab 06
-  verdict "06 FAILs when the leaf reads $leafval, not n/a (no hub)" "RUNG 06 FAIL C-r6:" 1
+  verdict "06 FAILs when the leaf reads $leafval, not n/a" "RUNG 06 FAIL C-r6:" 1
 done
 
 # --- 07 scheduled role ----------------------------------------------------------

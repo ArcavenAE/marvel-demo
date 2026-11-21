@@ -50,14 +50,19 @@ def script():
 class Seat:
     """The role's script run to its end, with the stub bd on PATH (or without it)."""
 
-    def __init__(self, test, ticks=1, with_bd=True):
-        self.root = tempfile.mkdtemp(prefix="bd-ticker.")
-        test.addCleanup(shutil.rmtree, self.root, True)
+    def __init__(self, test, ticks=1, with_bd=True, again=None):
+        # again: a Seat whose home and stub directory this run reuses, as a restart of the same session does
+        if again is None:
+            self.root = tempfile.mkdtemp(prefix="bd-ticker.")
+            test.addCleanup(shutil.rmtree, self.root, True)
+        else:
+            self.root = again.root
         self.stub = os.path.join(self.root, "stub")
         self.bin = os.path.join(self.root, "bin")
         self.home = os.path.join(self.root, "home")
         for d in (self.stub, self.bin, self.home):
-            os.mkdir(d)
+            if not os.path.isdir(d):
+                os.mkdir(d)
         if with_bd:
             with open(os.path.join(self.bin, "bd"), "w") as f:
                 f.write(STUB)
@@ -110,13 +115,19 @@ class Behavior(unittest.TestCase):
         self.assertEqual(len(creates), 1, "bd calls: %r" % s.bd_calls())
         self.assertIn("%s %s" % (MARKER, SESSION), creates[0])
         labels = creates[0].split("--labels ")[1].split()[0].split(",") if "--labels " in creates[0] else []
-        self.assertIn("lab", labels, "the issue carries no lab label: %r" % creates[0])
-        self.assertIn(LABEL, labels, "the issue carries no %s marker label: %r" % (LABEL, creates[0]))
+        self.assertEqual(labels, ["lab", LABEL], "the issue's labels are not exactly lab and %s: %r" % (LABEL, creates[0]))
 
     def test_it_files_once_however_many_ticks(self):
         s = Seat(self, ticks=3)
         creates = [c for c in s.bd_calls() if c.startswith("create")]
         self.assertEqual(len(creates), 1, "bd calls: %r" % s.bd_calls())
+
+    def test_a_restart_of_the_same_session_does_not_file_a_second_issue(self):
+        # restart_policy is always: the process is run again for the same session name and home
+        first = Seat(self, ticks=2)
+        Seat(self, ticks=2, again=first)
+        creates = [c for c in first.bd_calls() if c.startswith("create")]
+        self.assertEqual(len(creates), 1, "bd calls over two runs: %r" % first.bd_calls())
 
     def test_it_never_closes_or_edits_what_it_filed(self):
         s = Seat(self, ticks=3)
