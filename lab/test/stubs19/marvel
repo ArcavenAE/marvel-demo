@@ -1,0 +1,19 @@
+#!/bin/sh
+# Test stub for marvel, rungs 1 to 9. Answers come from files in $LABT_STATE.
+S=$LABT_STATE
+case "$1" in
+  get) cat "$S/sessions.json" ;;
+  attach)
+    case " $* " in
+      *" --print "*) cat "$S/attach.out" ;;
+      *) echo bare >"$S/attach.bare"; exit 3 ;;
+    esac ;;
+  capture) cat "$S/capture.out" ;;
+  bus) cat "$S/bus.out" ;;
+  events)
+    case " $* " in
+      *" cadence.slot-opened "*|*" team.shift-completed "*) cat "$S/events.out" ;;
+      *) ;;
+    esac ;;
+  version) cat "$S/version.out" ;;
+esac

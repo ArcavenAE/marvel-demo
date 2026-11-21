@@ -1,0 +1,7 @@
+#!/bin/sh
+# Test stub for bd: list --all --json and show <id> --json read state files.
+S=$LABT_STATE
+case "$1" in
+  list) cat "$S/bd.list.json" ;;
+  show) cat "$S/bd.show.json" ;;
+esac

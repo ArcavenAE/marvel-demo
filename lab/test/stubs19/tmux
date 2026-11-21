@@ -1,0 +1,4 @@
+#!/bin/sh
+# Test stub for tmux: records the call, answers from $LABT_STATE/tmux.rc.
+echo "$*" >>"$LABT_STATE/tmux.calls"
+exit "$(cat "$LABT_STATE/tmux.rc")"
