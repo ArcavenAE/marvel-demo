@@ -79,11 +79,16 @@ REQUIRED_DENY = [
     "Edit(./lab/mod.just)",
     "Edit(./lab/justfile)",
     "Edit(./lab/.justfile)",
+    "Edit(./lab/Justfile)",
     # Roots of trust outside the Edit(./lab/**) allow: the recipes, the root
     # justfile and these settings. Without a deny each would prompt, not refuse.
     "Edit(./lab.just)",
     "Edit(./justfile)",
     "Edit(./.claude/settings.json)",
+    # The report posts to the repo `origin` names, and .git/config holds it. The
+    # local settings file is read by Claude Code for permissions as well.
+    "Edit(./.git/config)",
+    "Edit(./.claude/settings.local.json)",
     "Read(./lab/deny-probe)",
 ]
 

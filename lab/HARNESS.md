@@ -92,6 +92,8 @@ runs, so each is a root of trust and the agent may not edit it. Each has an
 - `justfile`: the root file that loads the recipes.
 - `.claude/settings.json`: the permissions themselves.
 - `lab/check-settings`: the check that those permissions are the right ones.
+- `.git/config`: holds `origin`, the repo a report posts to.
+- `.claude/settings.local.json`: read for permissions beside the shared file.
 
 The same files stay out of reach of an allowed command: the `just lab` recipes
 only print a rung file, run a pinned file through `lab/run`, or run `lab/run`,
