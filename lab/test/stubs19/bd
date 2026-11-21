@@ -2,6 +2,8 @@
 # Test stub for bd: list --all --json and show <id> --json read state files.
 S=$LABT_STATE
 case "$1" in
-  list) cat "$S/bd.list.json" ;;
+  list)
+    echo "$*" >>"$S/bd.calls"
+    case " $* " in *" --label lab-ticker-note "*) cat "$S/bd.list.json" ;; *) echo '[]' ;; esac ;;
   show) cat "$S/bd.show.json" ;;
 esac

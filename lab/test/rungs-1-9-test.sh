@@ -313,7 +313,7 @@ verdict "07 passes across midnight" "RUNG 07 PASS" 0
 
 # --- 08 bd round trip -----------------------------------------------------------
 fixture r08
-ISSUE='{"id":"orc-u6d","title":"lab note from ticker seat bdt-ticker-g1-0","status":"%s"}'
+ISSUE='{"id":"orc-u6d","title":"lab note from ticker seat bd-ticker-ticker-g1-0","status":"%s","labels":["lab","lab-ticker-note"]}'
 bdstate() {
   put bd.list.json "[$(printf "$ISSUE" "$1")]"
   put bd.show.json "[$(printf "$ISSUE" "$1")]"
@@ -330,9 +330,9 @@ verdict "08 FAILs when no seat filed an issue" "RUNG 08 FAIL C-r8:" 1
 put bd.list.json '[{"id":"orc-zz1","title":"an unrelated issue","status":"closed"}]'
 lab 08
 verdict "08 FAILs when the only issue is not the seat's" "RUNG 08 FAIL C-r8:" 1
-put bd.list.json '[{"id":"orc-zz2","title":"lab note from relay seat","status":"closed"}]'
+bdstate closed
 lab 08
-verdict "08 FAILs on a lookalike title: the match is the marker the bd workload writes" "RUNG 08 FAIL C-r8:" 1
+if [[ $OUT == *"RUNG 08 PASS"* ]] && grep -q -e "--label lab-ticker-note" "$ST/bd.calls" 2>/dev/null; then ok "08 finds the issue by the label marker the bd workload writes, not by its title"; else bad "08 did not pass, or did not ask bd for the lab-ticker-note label: [$OUT]"; fi
 
 # --- 09 rollback and upgrade ----------------------------------------------------
 fixture r09
@@ -414,7 +414,7 @@ has 05 ALL "marvel inject" "nonce-05" "marvel capture"
 has 05 "Expected prompts" "marvel inject"
 has 06 ALL "DIRECTOR_NATS_PASS_FILE" "agent.lab.relay" "nats" "marvel work"
 has 07 ALL "marvel events" "cadence.slot-opened"
-has 08 ALL "bd" "lab note from ticker seat"
+has 08 ALL "bd" "lab-ticker-note"
 has 08 "Expected prompts" "bd close"
 has 09 ALL "marvel upgrade --daemon" "marvel daemon reexec" "v2"
 has 02 "Expected prompts" "marvel attach"

@@ -22,6 +22,7 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 MANIFEST = os.path.join(HERE, "manifest.toml")
 MARKER = "lab note from ticker seat"
+LABEL = "lab-ticker-note"
 SESSION = "bd-ticker-ticker-g1-0"
 
 STUB = """#!/bin/sh
@@ -108,7 +109,9 @@ class Behavior(unittest.TestCase):
         creates = [c for c in s.bd_calls() if c.startswith("create")]
         self.assertEqual(len(creates), 1, "bd calls: %r" % s.bd_calls())
         self.assertIn("%s %s" % (MARKER, SESSION), creates[0])
-        self.assertIn("lab", creates[0].replace(MARKER, ""), "the issue carries no lab label")
+        labels = creates[0].split("--labels ")[1].split()[0].split(",") if "--labels " in creates[0] else []
+        self.assertIn("lab", labels, "the issue carries no lab label: %r" % creates[0])
+        self.assertIn(LABEL, labels, "the issue carries no %s marker label: %r" % (LABEL, creates[0]))
 
     def test_it_files_once_however_many_ticks(self):
         s = Seat(self, ticks=3)
