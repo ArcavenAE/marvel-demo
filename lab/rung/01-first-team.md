@@ -2,7 +2,7 @@
 
 Demo: marvel runs a team of one small shell seat, the ticker, and the seat writes a numbered line every 5 seconds.
 
-You: ask the agent to apply workloads/ticker/manifest.toml with `marvel work`, then to show the session with `marvel get sessions` and the first lines of the ticker's file. Run `just lab check 01` when the seat is running.
+You: ask the agent to apply workloads/ticker/manifest.toml with `marvel work`, then to show the session with `marvel get sessions` and the first lines of the ticker's file. Before the first run, clear lab-run/ticker (and the other lab-run workload directories) in your home yourself: later rungs count the files in it, so files left by an earlier run would count too. Run `just lab check 01` when the seat is running.
 
 ## Tools
 

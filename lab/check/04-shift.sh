@@ -64,16 +64,35 @@ bounded() {
 
 STATE=${LAB_STATE:-$HOME/lab-run}
 
+
+# sess <team> <role>: read marvel get sessions -o json on stdin, print one line per
+# matching session: state pid workspace name pane generation
+sess() {
+  python3 -I -c 'import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(3)
+for s in d:
+    if s.get("Team") == sys.argv[1] and s.get("Role") == sys.argv[2]:
+        print(s.get("State", ""), s.get("PID", 0), s.get("Workspace", ""), s.get("Name", ""), s.get("PaneID", ""), s.get("Generation", 0))' "$1" "$2" 2>/dev/null
+}
+
 command -v marvel >/dev/null 2>&1 || fail C-r4 "marvel is not on PATH"
 
 t0=$SECONDS
 seen=""
 while :; do
   # the highest generation file is the successor; the files of a lower generation are predecessors
+  # Only sessions marvel lists count: a file left by an earlier run is not a successor.
+  bounded "$WAIT" marvel get sessions -o json
+  [[ $B_RC -eq 0 ]] || fail C-r4 "marvel get sessions failed (exit $B_RC)"
+  listed=" $(printf '%s' "$B_OUT" | sess ticker ticker | awk '{ printf "%s ", $4 }')"
   succ=""
   succgen=0
   for f in "$STATE"/ticker/*.log; do
     [[ -s $f ]] || continue
+    case $listed in *" $(basename "$f" .log) "*) ;; *) continue ;; esac
     g=$(head -n 1 "$f" | sed -n 's/.* gen=\([0-9][0-9]*\) .*/\1/p')
     [[ -n $g ]] || continue
     if [[ $g -gt $succgen ]]; then succgen=$g; succ=$f; fi

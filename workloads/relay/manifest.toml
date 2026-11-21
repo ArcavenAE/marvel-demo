@@ -27,10 +27,13 @@ name = "relay"
     args = ["-c", '''u="${RELAY_URL:-${NATS_URL:-nats://127.0.0.1:4222}}"
 d="${RELAY_DIR:-${LAB_STATE:-$HOME/lab-run}/relay}"
 mkdir -p "$d"
-bus() {
+cred() {
   if [ ! -r "${DIRECTOR_NATS_PASS_FILE:-}" ]; then echo "relay: no readable DIRECTOR_NATS_PASS_FILE" >&2; return 1; fi
-  NATS_USER="${DIRECTOR_NATS_USER:-}" NATS_PASSWORD="$(cat "$DIRECTOR_NATS_PASS_FILE")" nats --no-context --server "$u" "$@"
+  NATS_USER="${DIRECTOR_NATS_USER:-}"
+  NATS_PASSWORD="$(cat "$DIRECTOR_NATS_PASS_FILE")"
+  export NATS_USER NATS_PASSWORD
 }
+bus() { ( cred || exit 1; exec nats --no-context --server "$u" "$@" ); }
 bus sub --raw agent.lab.relay.ping | while read -r line; do
   [ -n "$line" ] || continue
   echo "$MARVEL_SESSION heard $line" >> "$d/$MARVEL_SESSION.log"
@@ -49,11 +52,14 @@ done
     args = ["-c", '''u="${RELAY_URL:-${NATS_URL:-nats://127.0.0.1:4222}}"
 d="${RELAY_DIR:-${LAB_STATE:-$HOME/lab-run}/relay}"
 mkdir -p "$d"
-bus() {
+cred() {
   if [ ! -r "${DIRECTOR_NATS_PASS_FILE:-}" ]; then echo "relay: no readable DIRECTOR_NATS_PASS_FILE" >&2; return 1; fi
-  NATS_USER="${DIRECTOR_NATS_USER:-}" NATS_PASSWORD="$(cat "$DIRECTOR_NATS_PASS_FILE")" nats --no-context --server "$u" "$@"
+  NATS_USER="${DIRECTOR_NATS_USER:-}"
+  NATS_PASSWORD="$(cat "$DIRECTOR_NATS_PASS_FILE")"
+  export NATS_USER NATS_PASSWORD
 }
-bus sub --raw agent.lab.relay.pong >> "$d/$MARVEL_SESSION.log" &
+bus() { ( cred || exit 1; exec nats --no-context --server "$u" "$@" ); }
+( cred || exit 1; exec nats --no-context --server "$u" sub --raw agent.lab.relay.pong ) >> "$d/$MARVEL_SESSION.log" &
 p=$!
 trap 'kill "$p" 2>/dev/null' EXIT
 n=0
